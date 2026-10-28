@@ -13,6 +13,7 @@ import WestieKit
 ///      `toggle:<面板>` `hide` `appearance:dark|light`（收起聚焦窗口） `layout`（记录各面板的窗口）
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
+///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图）
 ///
 /// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
@@ -83,6 +84,8 @@ enum Automation {
                 note("assisting=\(layout.assisting.map(\.rawValue).sorted())")
             case "cancel":
                 layout.cancelDrag()
+            case "grips":
+                layout.gripsShown = argument != "off"
             case "hover":
                 guard let panel = PanelID(rawValue: argument), let id = layout.focusedWindowId else { note("FAIL hover \(argument)"); continue }
                 layout.hoverTarget = layout.appendTarget(panel, dragging: id)

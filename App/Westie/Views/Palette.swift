@@ -107,6 +107,7 @@ struct FrameBackground: View {
                 .resizable(resizingMode: .tile)
                 .blendMode(palette.dark ? .softLight : .overlay)
                 .opacity(0.22)
+            AppMoveArea()
         }
         .ignoresSafeArea()
     }

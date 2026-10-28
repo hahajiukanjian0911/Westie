@@ -96,6 +96,10 @@ final class PanelLayout {
     private(set) var drag: WindowDrag?
     /// 布局按钮的五格图上悬停的格子对应的落点，只用来画预览。
     var hoverTarget: DropTarget?
+    #if DEBUG
+    /// 自动化截图用：所有窗口的拖动条常亮。
+    var gripsShown = false
+    #endif
     /// 窗口移走后空出来、正在请你挑一个收着的窗口补上的面板。
     private(set) var assisting: Set<PanelID> = []
 

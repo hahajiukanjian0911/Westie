@@ -58,10 +58,14 @@ struct Workbench: View {
         PanelView(panel: id, layout: layout, model: model, tiles: tiles)
     }
 
-    /// 补位时：点补位区以外的地方或按 Esc 就收掉。只旁听事件，不拦截点击。
+    /// 拖动窗口时按 Esc 取消。补位时：点补位区以外的地方或按 Esc 就收掉。只旁听事件，不拦截点击。
     private func watchAssist() {
         guard assistMonitor == nil else { return }
         assistMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [layout] event in
+            if event.type == .keyDown, event.keyCode == 53, layout.drag != nil {
+                withAnimation(Workbench.settle) { layout.cancelDrag() }
+                return nil
+            }
             guard !layout.assisting.isEmpty else { return event }
             if event.type == .keyDown {
                 guard event.keyCode == 53 else { return event }
@@ -102,7 +106,8 @@ private struct PanelView: View {
     var body: some View {
         let windows = layout.shownWindows(in: panel)
         Group {
-            if windows.isEmpty, layout.assisting.contains(panel) {
+            // 对话面板没有开关，窗口全收起时就一直列出收着的窗口，免得找不回来。
+            if windows.isEmpty, layout.assisting.contains(panel) || (panel == .center && !layout.hiddenWindows(in: panel).isEmpty) {
                 AssistView(panel: panel, layout: layout, model: model)
             } else if windows.isEmpty {
                 EmptyCenterView(model: model)
@@ -220,6 +225,8 @@ private struct WindowTile: View {
     let model: AppModel
     @Environment(\.palette) private var palette
     @State private var hovering = false
+    @State private var nearGrip = false
+    @State private var onGrip = false
     @State private var showingMap = false
 
     private var focused: Bool { layout.focusedWindowId == window.id }
@@ -232,9 +239,25 @@ private struct WindowTile: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .modifier(TileSurface(onFrame: onFrame, palette: palette))
+        .overlay(alignment: .top) {
+            WindowGrip(shown: gripShown, highlighted: onGrip)
+        }
         .opacity(layout.drag?.windowId == window.id ? 0.35 : 1)
         .animation(.easeOut(duration: 0.16), value: layout.drag?.windowId == window.id)
-        .onHover { hovering = $0 }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let point):
+                hovering = true
+                let width = layout.tileFrames[window.id]?.width ?? 0
+                let dx = abs(point.x - width / 2)
+                nearGrip = point.y < WindowGrip.reach.height && dx < WindowGrip.reach.width / 2
+                onGrip = point.y < 16 && dx < 36
+            case .ended:
+                hovering = false
+                nearGrip = false
+                onGrip = false
+            }
+        }
         .simultaneousGesture(TapGesture().onEnded { layout.focus(window.id) })
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Workbench.space)) } action: {
             layout.tileFrames[window.id] = $0
@@ -299,12 +322,30 @@ private struct WindowTile: View {
         .padding(.leading, leading)
         .padding(.trailing, 8)
         .frame(height: onFrame ? 36 : 44)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 5, coordinateSpace: .named(Workbench.space))
-                .onChanged { layout.updateDrag(window.id, at: $0.location, from: $0.startLocation) }
-                .onEnded { _ in withAnimation(Workbench.settle) { layout.endDrag() } }
-        )
+        .background { dragArea }
+    }
+
+    /// 标题栏空白处（拖动条就画在它上面）：拖着窗口换位置。
+    private var dragArea: WindowDragArea {
+        WindowDragArea {
+            layout.focus(window.id)
+        } onDrag: { location, start in
+            layout.updateDrag(window.id, at: location, from: start)
+        } isDragging: {
+            layout.drag?.windowId == window.id
+        } onEnd: {
+            withAnimation(Workbench.settle) { layout.endDrag() }
+        } onCancel: {
+            layout.cancelDrag()
+        }
+    }
+
+    /// 指针靠近窗口顶部正中，或正拖着这个窗口时，亮出拖动条。
+    private var gripShown: Bool {
+        #if DEBUG
+        if layout.gripsShown { return true }
+        #endif
+        return nearGrip || layout.drag?.windowId == window.id
     }
 
     /// 面板里有收着的窗口时，标题变成切换菜单（带一个小箭头）。
@@ -368,6 +409,149 @@ private struct WindowTile: View {
             } else {
                 ProgressView().controlSize(.small)
             }
+        }
+    }
+}
+
+/// 窗口顶部正中的拖动条：平时不显示，指针靠近才浮出，提示这里能拖动窗口。
+private struct WindowGrip: View {
+    /// 指针进入窗口顶部正中这块范围内就浮出。
+    static let reach = CGSize(width: 180, height: 28)
+    let shown: Bool
+    let highlighted: Bool
+    @Environment(\.palette) private var palette
+
+    /// 只画出来，不接事件：拖动由标题栏底下的拖动区域接，窄窗口里与按钮重叠时按钮优先。
+    var body: some View {
+        Capsule()
+            .fill(highlighted ? palette.ink3 : palette.ink4)
+            .frame(width: highlighted ? 40 : 32, height: 4)
+            .padding(.top, 5)
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : -3)
+            .allowsHitTesting(false)
+            .animation(.easeOut(duration: 0.16), value: shown)
+            .animation(.spring(duration: 0.2, bounce: 0.2), value: highlighted)
+    }
+}
+
+/// 拖动 App 的地方只有外框露出来的部分。隐藏标题栏那一条默认整条都拖 App，会抢走窗口标题栏和拖动条上的拖动，
+/// 所以关掉系统的自动拖动（`isMovable = false`），由外框自己调 `performDrag`；双击照系统设置缩放或最小化。
+struct AppMoveArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> AreaView { AreaView() }
+    func updateNSView(_ view: AreaView, context: Context) {}
+
+    final class AreaView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.isMovable = false
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            if event.clickCount == 2 {
+                let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick")
+                if action == "Minimize" { window.performMiniaturize(nil) } else if action != "None" { window.performZoom(nil) }
+                return
+            }
+            // 系统自动拖动关着；主动拖时临时打开，拖完恢复（与 cmux 的 WindowDragHandleView 同法）。
+            window.isMovable = true
+            window.performDrag(with: event)
+            window.isMovable = false
+        }
+    }
+}
+
+/// 拖动窗口的区域：标题栏空白处和顶部拖动条。用 AppKit 视图自己接按下和拖动，坐标换成 Workbench 坐标（与窗口内容左上角对齐）。
+struct WindowDragArea: NSViewRepresentable {
+    let onPress: () -> Void
+    let onDrag: (CGPoint, CGPoint) -> Void
+    /// 拖动是否还在进行（Esc 等取消后为假，之后的拖动和松手都不再生效）。
+    let isDragging: () -> Bool
+    let onEnd: () -> Void
+    let onCancel: () -> Void
+
+    func makeNSView(context: Context) -> AreaView { AreaView() }
+
+    func updateNSView(_ view: AreaView, context: Context) {
+        view.onPress = onPress
+        view.onDrag = onDrag
+        view.isDragging = isDragging
+        view.onEnd = onEnd
+        view.onCancel = onCancel
+    }
+
+    static func dismantleNSView(_ view: AreaView, coordinator: ()) {
+        view.abandon()
+    }
+
+    final class AreaView: NSView {
+        var onPress: () -> Void = {}
+        var onDrag: (CGPoint, CGPoint) -> Void = { _, _ in }
+        var isDragging: () -> Bool = { false }
+        var onEnd: () -> Void = {}
+        var onCancel: () -> Void = {}
+        private var start: CGPoint?
+        private var dragging = false
+
+        /// 拖到一半视图被拿掉（面板收起、窗口关闭）时收不到松手，就地取消。
+        func abandon() {
+            if dragging, isDragging() { onCancel() }
+            start = nil
+            dragging = false
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { abandon() }
+        }
+
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: dragging ? .closedHand : .openHand)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            start = location(of: event)
+            dragging = false
+            onPress()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start else { return }
+            if dragging, !isDragging() {
+                // 已被取消：这次按下不再拖。
+                self.start = nil
+                dragging = false
+                window?.invalidateCursorRects(for: self)
+                return
+            }
+            let point = location(of: event)
+            if !dragging {
+                guard hypot(point.x - start.x, point.y - start.y) >= 5 else { return }
+                dragging = true
+                window?.invalidateCursorRects(for: self)
+                NSCursor.closedHand.set()
+            }
+            onDrag(point, start)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if dragging, isDragging() { onEnd() }
+            start = nil
+            dragging = false
+            window?.invalidateCursorRects(for: self)
+        }
+
+        private func location(of event: NSEvent) -> CGPoint {
+            guard let content = window?.contentView else { return .zero }
+            let point = content.convert(event.locationInWindow, from: nil)
+            return content.isFlipped ? point : CGPoint(x: point.x, y: content.bounds.height - point.y)
         }
     }
 }
