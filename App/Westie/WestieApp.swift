@@ -7,43 +7,41 @@ struct WestieApp: App {
 
     var body: some Scene {
         Window("Westie", id: "main") {
-            KernelStatusView(host: appDelegate.host)
-                .task { await appDelegate.host.start() }
+            RootView(model: appDelegate.model)
+                .frame(minWidth: 760, minHeight: 480)
+                .task {
+                    await appDelegate.model.start()
+                    #if DEBUG
+                    await Automation.runIfRequested(model: appDelegate.model)
+                    #endif
+                }
         }
+        .defaultSize(width: 1100, height: 720)
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    @MainActor let host = KernelHost()
+    @MainActor let model: AppModel = {
+        do {
+            return AppModel(configuration: try .development())
+        } catch {
+            fatalError("无法定位开发期内核：\(error)")
+        }
+    }()
 
     /// 等内核排空持久化后再退出（KernelProcess.stop 最多等 5 秒）。
+    /// 收尾不走主 actor，答复也不走主队列：AppKit 在嵌套事件循环里等答复，若 terminate 正是从
+    /// 主 actor 任务或主队列 block 里调用的，排在它们上面的工作都轮不到。所以在后台结束连接与内核，
+    /// 再用 RunLoop 投递答复（嵌套循环也会执行 common 模式的 RunLoop block）。
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Task { @MainActor in
-            await host.stop()
-            sender.reply(toApplicationShouldTerminate: true)
+        let handles = MainActor.assumeIsolated { model.prepareShutdown() }
+        Task.detached {
+            await handles.connection?.disconnect()
+            await handles.kernel?.stop()
+            RunLoop.main.perform(inModes: [.common]) { sender.reply(toApplicationShouldTerminate: true) }
         }
         return .terminateLater
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-}
-
-/// 第 1 步的占位界面：只显示内核状态。正式界面按主窗口 v7 在后续步骤实现。
-struct KernelStatusView: View {
-    let host: KernelHost
-
-    var body: some View {
-        Group {
-            switch host.state {
-            case .starting:
-                ProgressView("正在启动内核…")
-            case .connected(let sessions):
-                Label("内核已连接 · \(sessions) 个会话", systemImage: "checkmark.circle")
-            case .failed(let message):
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-            }
-        }
-        .frame(minWidth: 480, minHeight: 320)
-    }
 }

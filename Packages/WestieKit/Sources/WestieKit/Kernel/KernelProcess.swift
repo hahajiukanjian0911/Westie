@@ -37,6 +37,8 @@ public actor KernelProcess {
         public var startupTimeout: Duration = .seconds(90)
         /// 内核 stdout/stderr 的追加日志文件。
         public var logFile: URL?
+        /// 额外的环境变量，在清除 API key 之后设置（假模型地址等）。
+        public var environment: [String: String] = [:]
 
         public init() {}
     }
@@ -153,6 +155,7 @@ public actor KernelProcess {
                 environment.removeValue(forKey: key)
             }
         }
+        environment.merge(options.environment) { _, new in new }
         child.environment = environment
         return child
     }
