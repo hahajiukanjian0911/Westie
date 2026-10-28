@@ -104,7 +104,9 @@ const server = createServer(async (req, res) => {
     index += 1
   }
   send('content_block_start', { index, content_block: { type: 'text', text: '' } })
-  for (const piece of text.match(/[\s\S]{1,6}/g)) { send('content_block_delta', { index, delta: { type: 'text_delta', text: piece } }); await pause(25) }
+  // 消息末尾带 slow 时放慢到约 1/5 速度，方便看流式出字
+  const step = /slow\s*$/.test(userText(body)) ? 120 : 25
+  for (const piece of text.match(/[\s\S]{1,6}/g)) { send('content_block_delta', { index, delta: { type: 'text_delta', text: piece } }); await pause(step) }
   send('content_block_stop', { index })
   if (tool) {
     index += 1

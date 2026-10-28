@@ -9,6 +9,7 @@ DeepSeek Harness（DSH）的原生 macOS 客户端：沿用 DSH 内核，界面�
 | `kernel/` | 自带的 DSH 内核：npm 依赖（锁定 0.2.1-rc.3，与 DSH.app 同版本）、启动壳 `launch.mjs`、`bundle/`（`@westie/kernel-bundle`，关掉只服务浏览器界面的行） |
 | `Packages/WestieKit` | 内核进程管理（`KernelProcess`）、Remote 连接（`KernelConnection`）、数据折叠（`WorkspaceBoard`、`Transcript`） |
 | `App/Westie` | App：`AppModel`（生命周期、会话、审批与提问）、`ConversationModel`、界面；Markdown 用 [Textual](https://github.com/gonzalezreal/textual)（MIT）渲染 |
+| `Packages/Textual` | Textual 0.5.0 的副本，打了流式出字所需的小补丁（见 `PATCHES.md`） |
 | `scripts/` | 开发工具：`kernel.sh` 单独起内核、`probe.mjs` 链路探针、`mock-llm.mjs` 假模型、`dump-remote.mjs` 导出接口描述符 |
 
 界面由五个平级的面板组成：顶部、主边栏、对话、侧边栏、底部（`PanelLayout`、`Workbench`）。面板只管位置、尺寸和收起；内容是窗口，一个面板里的窗口可以并排显示或收着，窗口能拖到别的面板。布局保存在 UserDefaults，不写 `~/.dsh`。
@@ -40,7 +41,7 @@ node scripts/mock-llm.mjs 3190 &
 open --env WESTIE_MOCK_LLM=3190 temp/DerivedData/Build/Products/Debug/Westie.app
 ```
 
-假模型的暗号：`/bash` 调一次无害的 bash、`/approve` 触发审批、`/ask` 向你提问、`/md` 回一段覆盖常见语法的 Markdown，其余消息原样回显。假模型模式下也可以用 `WESTIE_DSH_HOME` 另指一份测试数据，和已开着的测试实例互不干扰。
+假模型的暗号：`/bash` 调一次无害的 bash、`/approve` 触发审批、`/ask` 向你提问、`/md` 回一段覆盖常见语法的 Markdown，消息以 `slow` 结尾时放慢出字，其余消息原样回显。假模型模式下也可以用 `WESTIE_DSH_HOME` 另指一份测试数据，和已开着的测试实例互不干扰。
 
 ## 测试
 

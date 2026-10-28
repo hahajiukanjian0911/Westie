@@ -4,6 +4,10 @@ import WestieKit
 struct ConversationView: View {
     let model: AppModel
     let conversation: ConversationModel
+    /// 跟随到底：内容变高时平滑滚到底；用户往上翻就停，翻回底部再接着跟。
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    @State private var following = true
+    @State private var atBottom = true
 
     private var approvals: [PendingApproval] { model.approvals.filter { $0.sessionId == conversation.sessionId } }
     private var questions: [PendingQuestion] { model.questions.filter { $0.sessionId == conversation.sessionId } }
@@ -45,7 +49,26 @@ struct ConversationView: View {
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity)
             }
-            .defaultScrollAnchor(.bottom)
+            .scrollPosition($scrollPosition)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.bottom, for: .alignment)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 24
+            } action: { _, value in
+                atBottom = value
+            }
+            .onScrollPhaseChange { old, new in
+                // 只看用户自己滚动的结果，程序滚动（.animating）不改变跟随状态
+                if new == .idle, old == .interacting || old == .decelerating { following = atBottom }
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
+                guard following, new > old else { return }
+                withAnimation(.easeOut(duration: 0.3)) { scrollPosition.scrollTo(edge: .bottom) }
+            }
+            .onChange(of: conversation.transcript.items.count) {
+                // 自己发出新消息时回到跟随
+                if case .user = conversation.transcript.items.last { following = true }
+            }
             .overlay {
                 if conversation.isLoading {
                     ProgressView()
