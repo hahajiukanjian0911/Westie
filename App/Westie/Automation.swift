@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import Foundation
+import SwiftUI
 import WestieKit
 
 /// 开发期自动化：按 `WESTIE_AUTOMATION` 里分号分隔的步骤驱动 App，用于后台验证。
@@ -10,6 +11,8 @@ import WestieKit
 ///      `approve` `reject` `answer:<选项>` `select:<序号>` `shot:<png 路径>` `dump` `quit`
 ///      面板：`split:<序号>`（并排打开第 n 个会话） `move:<面板>`（聚焦窗口移到 top/primary/center/secondary/bottom）
 ///      `toggle:<面板>` `hide` `appearance:dark|light`（收起聚焦窗口） `layout`（记录各面板的窗口）
+///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
+///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
 ///
 /// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
@@ -62,6 +65,27 @@ enum Automation {
                 // 只改 App 自己的外观，不动系统深浅色。
                 NSApp.appearance = NSAppearance(named: argument == "dark" ? .darkAqua : .aqua)
                 try? await Task.sleep(for: .milliseconds(300))
+            case "drag":
+                guard let id = layout.drag?.windowId ?? layout.focusedWindowId, let tile = layout.tileFrames[id] else {
+                    note("FAIL 没有可拖的窗口"); continue
+                }
+                let start = CGPoint(x: tile.midX, y: tile.minY + 18)
+                if layout.drag == nil { layout.updateDrag(id, at: CGPoint(x: start.x, y: start.y + 8), from: start) }
+                guard let points = dragPoints(argument, layout: layout) else { note("FAIL 看不懂拖放位置 \(argument)"); continue }
+                for point in points {
+                    layout.updateDrag(id, at: point, from: start)
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+                note("drag target=\(layout.drag?.target.map { "\($0.panel.rawValue) \($0.kind) @\($0.index)" } ?? "无") map=\(layout.drag?.mapOpen ?? false)")
+            case "drop":
+                withAnimation(Workbench.settle) { layout.endDrag() }
+                try? await Task.sleep(for: .milliseconds(500))
+                note("assisting=\(layout.assisting.map(\.rawValue).sorted())")
+            case "cancel":
+                layout.cancelDrag()
+            case "hover":
+                guard let panel = PanelID(rawValue: argument), let id = layout.focusedWindowId else { note("FAIL hover \(argument)"); continue }
+                layout.hoverTarget = layout.appendTarget(panel, dragging: id)
             case "hide":
                 if let id = layout.focusedWindowId { layout.hide(id) }
             case "layout":
@@ -130,6 +154,35 @@ enum Automation {
             }
             note("done \(step) | items=\(model.conversation?.transcript.items.count ?? -1) running=\(model.conversation?.transcript.running ?? false) approvals=\(model.approvals.count) questions=\(model.questions.count)")
         }
+    }
+
+    /// 拖放步骤的指针轨迹（Workbench 坐标）。
+    private static func dragPoints(_ argument: String, layout: PanelLayout) -> [CGPoint]? {
+        let bounds = layout.bounds
+        let center = layout.panelFrames[.center] ?? bounds
+        if argument.hasPrefix("edge.") {
+            switch argument.dropFirst(5) {
+            case "primary": return [CGPoint(x: bounds.minX + 6, y: bounds.midY)]
+            case "secondary": return [CGPoint(x: bounds.maxX - 6, y: bounds.midY)]
+            case "bottom": return [CGPoint(x: center.midX, y: bounds.maxY - 6)]
+            default: return nil
+            }
+        }
+        if argument.hasPrefix("map.") {
+            guard let panel = PanelID(rawValue: String(argument.dropFirst(4))),
+                  let cell = PanelLayout.mapCells(in: layout.mapFrame)[panel] else { return nil }
+            return [CGPoint(x: center.midX, y: bounds.minY + 6), CGPoint(x: cell.midX, y: cell.midY)]
+        }
+        if let at = argument.firstIndex(of: "@") {
+            let parts = argument[..<at].split(separator: ".")
+            let fractions = argument[argument.index(after: at)...].split(separator: ",").compactMap { Double($0) }
+            guard parts.count == 2, let panel = PanelID(rawValue: String(parts[0])), let index = Int(parts[1]), fractions.count == 2 else { return nil }
+            let shown = layout.shownWindows(in: panel)
+            guard shown.indices.contains(index), let tile = layout.tileFrames[shown[index].id] else { return nil }
+            return [CGPoint(x: tile.minX + tile.width * fractions[0], y: tile.minY + tile.height * fractions[1])]
+        }
+        let numbers = argument.split(separator: ",").compactMap { Double($0) }
+        return numbers.count == 2 ? [CGPoint(x: numbers[0], y: numbers[1])] : nil
     }
 
     private static func until(timeout: Double = 10, _ condition: () -> Bool) async {

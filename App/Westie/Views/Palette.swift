@@ -18,7 +18,8 @@ struct Palette {
     let rowHover, rowHoverSolid, rowOn, rowOnStroke: Color
     let card, cardStroke, cardShadowNear, cardShadowFar: Color
     let bubble, code, box, boxStroke, boxShadow: Color
-    let zone, zoneHot: Color
+    /// 拖放预览：半透明的卡片底和一圈强调色描边。
+    let preview, previewRing: Color
     let frameBase: Color
     /// 外框的两团晕色：颜色和中心位置。
     let frameGlows: [(color: Color, center: UnitPoint)]
@@ -51,8 +52,8 @@ struct Palette {
         box = dark ? ok(0.24, 0.014, h0, 1) : .white
         boxStroke = dark ? .white.opacity(0.1) : ok(0.4, 0.04, h0, 0.18)
         boxShadow = dark ? .black.opacity(0.3) : ok(0.3, 0.06, h0, 0.12)
-        zone = dark ? ok(0.24, 0.014, h0, 0.78) : ok(0.97, 0.01, h0, 0.82)
-        zoneHot = dark ? ok(0.76, chroma, h0, 0.14) : ok(0.5, chroma, h0, 0.1)
+        preview = dark ? ok(0.3, 0.02, h0, 0.72) : ok(0.99, 0.006, h0, 0.78)
+        previewRing = dark ? ok(0.76, chroma, h0, 0.55) : ok(0.5, chroma, h0, 0.45)
 
         let lightness = dark ? 0.26 : 0.925, scale = dark ? 0.7 : 0.55
         frameBase = ok(lightness, colors[0].c * 0.8 * scale, h0, 1)

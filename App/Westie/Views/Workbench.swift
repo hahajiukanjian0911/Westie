@@ -1,14 +1,20 @@
+import AppKit
 import SwiftUI
 import WestieKit
 
 /// 五个面板的排布：主边栏、侧边栏通高；顶部、底部只在对话面板上下。
 /// 外观按「面板」设计稿 v1 方向 A：每个窗口一张卡片，窗口和面板之间是外框露出的 8pt 缝，拖缝调大小。
+/// 拖放按 v3：外圈开面板、窗口卡片前中后分并排与叠放、上沿布局条、标题栏布局按钮、移走后补位。
 struct Workbench: View {
     static let space = "workbench"
+    /// 松手或移动窗口后各窗口归位的弹簧。
+    static let settle = Animation.spring(duration: 0.38, bounce: 0.22)
 
     let layout: PanelLayout
     let model: AppModel
     @Environment(\.palette) private var palette
+    @Namespace private var tiles
+    @State private var assistMonitor: Any?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -41,10 +47,35 @@ struct Workbench: View {
         .background { FrameBackground() }
         .coordinateSpace(.named(Self.space))
         .ignoresSafeArea(.container, edges: .top)
+        .onAppear(perform: watchAssist)
+        .onDisappear {
+            if let assistMonitor { NSEvent.removeMonitor(assistMonitor) }
+            assistMonitor = nil
+        }
     }
 
     private func panel(_ id: PanelID) -> some View {
-        PanelView(panel: id, layout: layout, model: model)
+        PanelView(panel: id, layout: layout, model: model, tiles: tiles)
+    }
+
+    /// 补位时：点补位区以外的地方或按 Esc 就收掉。只旁听事件，不拦截点击。
+    private func watchAssist() {
+        guard assistMonitor == nil else { return }
+        assistMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [layout] event in
+            guard !layout.assisting.isEmpty else { return event }
+            if event.type == .keyDown {
+                guard event.keyCode == 53 else { return event }
+                withAnimation(Workbench.settle) { layout.dismissAssist() }
+                return nil
+            }
+            if let view = event.window?.contentView {
+                let point = view.convert(event.locationInWindow, from: nil)
+                let flipped = view.isFlipped ? point : CGPoint(x: point.x, y: view.bounds.height - point.y)
+                if layout.assisting.contains(where: { layout.panelFrames[$0]?.contains(flipped) == true }) { return event }
+            }
+            DispatchQueue.main.async { withAnimation(Workbench.settle) { layout.dismissAssist() } }
+            return event
+        }
     }
 
     /// 红绿灯右侧的主边栏开关。主边栏收起时它落进最左上角窗口的标题行。
@@ -64,13 +95,16 @@ private struct PanelView: View {
     let panel: PanelID
     let layout: PanelLayout
     let model: AppModel
+    let tiles: Namespace.ID
     @Environment(\.palette) private var palette
     @State private var dragStart: (lead: Double, trail: Double)?
 
     var body: some View {
         let windows = layout.shownWindows(in: panel)
         Group {
-            if windows.isEmpty {
+            if windows.isEmpty, layout.assisting.contains(panel) {
+                AssistView(panel: panel, layout: layout, model: model)
+            } else if windows.isEmpty {
                 EmptyCenterView(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .card(palette)
@@ -101,6 +135,7 @@ private struct PanelView: View {
                             }
                             let length = total * weights[index] / sum
                             WindowTile(panel: panel, window: window, layout: layout, model: model)
+                                .matchedGeometryEffect(id: window.id, in: tiles)
                                 .frame(width: horizontal ? length : nil, height: horizontal ? nil : length)
                         }
                     }
@@ -185,6 +220,7 @@ private struct WindowTile: View {
     let model: AppModel
     @Environment(\.palette) private var palette
     @State private var hovering = false
+    @State private var showingMap = false
 
     private var focused: Bool { layout.focusedWindowId == window.id }
     private var onFrame: Bool { window.content == .sessions }
@@ -230,6 +266,20 @@ private struct WindowTile: View {
                     Button("添加工作区", systemImage: "folder.badge.plus") { SidebarView.chooseFolder(model: model) }
                         .help("添加工作区")
                 }
+                Button("移动窗口", systemImage: "square.grid.3x1.below.line.grid.1x2") { showingMap = true }
+                    .help("移动窗口")
+                    .popover(isPresented: $showingMap, arrowEdge: .bottom) {
+                        LayoutMap(current: panel, layout: layout, interactive: true) { target in
+                            showingMap = false
+                            layout.hoverTarget = nil
+                            guard target != panel else { return }
+                            withAnimation(Workbench.settle) { layout.move(window.id, to: target) }
+                        } onHover: { target in
+                            layout.hoverTarget = target.map { layout.appendTarget($0, dragging: window.id) }
+                        }
+                        .padding(8)
+                    }
+                    .onChange(of: showingMap) { if !showingMap { layout.hoverTarget = nil } }
                 Menu {
                     moreItems
                 } label: {
@@ -243,7 +293,7 @@ private struct WindowTile: View {
             .labelStyle(.iconOnly)
             .buttonStyle(IconButtonStyle())
             .menuStyle(.button)
-            .opacity(hovering ? 1 : 0)
+            .opacity(hovering || showingMap ? 1 : 0)
             .animation(.easeOut(duration: 0.16), value: hovering)
         }
         .padding(.leading, leading)
@@ -252,8 +302,8 @@ private struct WindowTile: View {
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 5, coordinateSpace: .named(Workbench.space))
-                .onChanged { layout.updateDrag(window.id, at: $0.location) }
-                .onEnded { _ in layout.endDrag() }
+                .onChanged { layout.updateDrag(window.id, at: $0.location, from: $0.startLocation) }
+                .onEnded { _ in withAnimation(Workbench.settle) { layout.endDrag() } }
         )
     }
 
@@ -302,12 +352,6 @@ private struct WindowTile: View {
 
     @ViewBuilder
     private var moreItems: some View {
-        Section("移到") {
-            ForEach(PanelID.allCases.filter { $0 != panel }) { target in
-                Button(target.title) { layout.move(window.id, to: target) }
-            }
-        }
-        Divider()
         Button("收起窗口") { layout.hide(window.id) }
         Button("关闭窗口") { layout.close(window.id) }
     }
@@ -359,64 +403,230 @@ struct IconButtonStyle: ButtonStyle {
     }
 }
 
-/// 拖动窗口时：不显示的面板在边缘露出虚线落点，目标位置画插入线，光标处跟一个窗口名。
+/// 拖动窗口时：一张小卡跟着指针，落点处浮出松手后的样子；指针到上沿时浮出布局条。
+/// 不拖时，布局按钮的五格图上悬停哪一格，也在这里预览。
 private struct DragOverlay: View {
+    let layout: PanelLayout
+    let model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let drag = layout.drag
+        let target = drag?.target ?? (drag == nil ? layout.hoverTarget : nil)
+        ZStack(alignment: .topLeading) {
+            if let target {
+                DropPreview(stack: { if case .stack = target.kind { true } else { false } }())
+                    .frame(width: target.rect.width, height: target.rect.height)
+                    .position(x: target.rect.midX, y: target.rect.midY)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+            if let drag, drag.mapOpen {
+                LayoutMap(current: layout.locate(drag.windowId)?.panel, layout: layout, hot: drag.target?.panel)
+                    .frame(width: PanelLayout.mapSize.width, height: PanelLayout.mapSize.height)
+                    .position(x: layout.mapFrame.midX, y: layout.mapFrame.midY)
+                    .transition(.opacity.combined(with: .offset(y: -10)))
+            }
+            if let drag, let window = layout.locate(drag.windowId)?.window {
+                DragCard(title: window.content.title(model: model))
+                    .scaleEffect(drag.mapOpen ? 0.6 : drag.target != nil ? 0.72 : 1, anchor: UnitPoint(x: drag.grab.x, y: 18 / DragCard.size.height))
+                    .opacity(drag.mapOpen ? 0 : drag.target != nil ? 0.5 : 1)
+                    .position(cardCenter(drag))
+                    .transition(.opacity.combined(with: .scale(scale: 1.3, anchor: UnitPoint(x: drag.grab.x, y: 0))))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(reduceMotion ? nil : .spring(duration: 0.22, bounce: 0.1), value: target)
+        .animation(.spring(duration: 0.22, bounce: 0.2), value: drag?.mapOpen)
+        .animation(.spring(duration: 0.2, bounce: 0.1), value: drag?.target == nil)
+        .animation(.easeOut(duration: 0.16), value: drag == nil)
+        .allowsHitTesting(false)
+    }
+
+    /// 小卡按按下的位置跟手，但不出窗口。
+    private func cardCenter(_ drag: WindowDrag) -> CGPoint {
+        let size = DragCard.size, bounds = layout.bounds, gap = Metrics.gap
+        let x = min(max(drag.location.x - size.width * drag.grab.x, bounds.minX + gap), bounds.maxX - size.width - gap)
+        let y = min(max(drag.location.y - drag.grab.y, bounds.minY + gap), bounds.maxY - size.height - gap)
+        return CGPoint(x: x + size.width / 2, y: y + size.height / 2)
+    }
+}
+
+/// 落点预览：半透明卡片加一圈强调色。叠放时背后错开露出一张卡边。
+private struct DropPreview: View {
+    let stack: Bool
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Metrics.cardRadius)
+        shape.fill(palette.preview)
+            .overlay(shape.strokeBorder(palette.previewRing, lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.18), radius: 16, y: 10)
+            .background {
+                if stack {
+                    shape.fill(palette.card)
+                        .overlay(shape.strokeBorder(palette.previewRing, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                        .scaleEffect(0.98)
+                        .offset(x: 10, y: -10)
+                }
+            }
+    }
+}
+
+/// 跟着指针的小卡：同一个窗口缩小，只留标题和几行示意。
+private struct DragCard: View {
+    static let size = CGSize(width: 220, height: 140)
+    let title: String
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .frame(height: 34)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach([1, 0.72, 0.84, 0.46], id: \.self) { width in
+                    Capsule().fill(palette.ink5).frame(width: (Self.size.width - 24) * width, height: 6)
+                }
+            }
+            .padding(.top, 6)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
+        .card(palette)
+        .shadow(color: .black.opacity(0.3), radius: 20, y: 18)
+    }
+}
+
+/// 五格布局图：左右是边栏，中间从上到下是顶部、对话、底部。有窗口的格子深一点，当前所在的格子描边。
+/// 拖动时作为布局条只显示；放在布局按钮的弹出框里时可以悬停预览、点击移动。
+private struct LayoutMap: View {
+    let current: PanelID?
+    let layout: PanelLayout
+    var hot: PanelID?
+    var interactive = false
+    var onPick: (PanelID) -> Void = { _ in }
+    var onHover: (PanelID?) -> Void = { _ in }
+    @Environment(\.palette) private var palette
+    @State private var hovered: PanelID?
+
+    init(current: PanelID?, layout: PanelLayout, hot: PanelID? = nil) {
+        self.current = current
+        self.layout = layout
+        self.hot = hot
+    }
+
+    init(current: PanelID?, layout: PanelLayout, interactive: Bool, onPick: @escaping (PanelID) -> Void, onHover: @escaping (PanelID?) -> Void) {
+        self.current = current
+        self.layout = layout
+        self.interactive = interactive
+        self.onPick = onPick
+        self.onHover = onHover
+    }
+
+    var body: some View {
+        let size = PanelLayout.mapSize
+        let cells = PanelLayout.mapCells(in: CGRect(origin: .zero, size: size))
+        ZStack(alignment: .topLeading) {
+            ForEach(PanelID.allCases) { panel in
+                if let cell = cells[panel] {
+                    let lit = hot == panel || hovered == panel
+                    let has = layout.isVisible(panel) && !layout.state(panel).shown.isEmpty
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(lit ? palette.accent : has ? palette.ink5 : palette.rowHoverSolid)
+                        .overlay {
+                            if panel == current {
+                                RoundedRectangle(cornerRadius: 4).strokeBorder(palette.ink3, lineWidth: 1.5)
+                            }
+                        }
+                        .frame(width: cell.width, height: cell.height)
+                        .offset(x: cell.minX, y: cell.minY)
+                        .contentShape(Rectangle())
+                        .onHover { inside in
+                            guard interactive else { return }
+                            hovered = inside ? panel : (hovered == panel ? nil : hovered)
+                            onHover(hovered)
+                        }
+                        .onTapGesture { if interactive { onPick(panel) } }
+                        .help(interactive ? panel.title : "")
+                        .animation(.easeOut(duration: 0.12), value: lit)
+                }
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .background(interactive ? .clear : palette.box, in: .rect(cornerRadius: 10))
+        .overlay {
+            if !interactive { RoundedRectangle(cornerRadius: 10).strokeBorder(palette.boxStroke, lineWidth: 0.5) }
+        }
+        .shadow(color: interactive ? .clear : .black.opacity(0.22), radius: 12, y: 8)
+    }
+}
+
+/// 补位：窗口移走后面板空了，原地列出收着的窗口，点一个补上。
+private struct AssistView: View {
+    let panel: PanelID
     let layout: PanelLayout
     let model: AppModel
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if let drag = layout.drag {
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(layout.dropZones()), id: \.key) { panel, zone in
-                    let hot = drag.target?.panel == panel
-                    RoundedRectangle(cornerRadius: Metrics.cardRadius)
-                        .fill(hot ? palette.zoneHot : .clear)
-                        .background(.ultraThinMaterial, in: .rect(cornerRadius: Metrics.cardRadius))
-                        .background(palette.zone, in: .rect(cornerRadius: Metrics.cardRadius))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: Metrics.cardRadius)
-                                .strokeBorder(hot ? palette.accent : palette.ink4, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                        }
-                        .overlay {
-                            Text(panel.title).font(.system(size: 11)).foregroundStyle(hot ? palette.ink : palette.ink3)
-                        }
-                        .frame(width: zone.width, height: zone.height)
-                        .offset(x: zone.minX, y: zone.minY)
-                        .transition(.opacity)
-                }
-                if let target = drag.target, layout.dropZones()[target.panel] == nil,
-                   let frame = layout.indicatorFrame(for: target, dragging: drag.windowId) {
-                    let fills = frame.width > 8 && frame.height > 8
-                    RoundedRectangle(cornerRadius: fills ? Metrics.cardRadius : 1.5)
-                        .fill(fills ? palette.zoneHot : palette.accent)
-                        .overlay {
-                            if fills {
-                                RoundedRectangle(cornerRadius: Metrics.cardRadius).strokeBorder(palette.accent, lineWidth: 1)
-                            }
-                        }
-                        .frame(width: fills ? frame.width : (frame.width > frame.height ? frame.width - 16 : 3),
-                               height: fills ? frame.height : (frame.width > frame.height ? 3 : frame.height - 16))
-                        .offset(x: fills ? frame.minX : (frame.width > frame.height ? frame.minX + 8 : frame.midX - 1.5),
-                                y: fills ? frame.minY : (frame.width > frame.height ? frame.midY - 1.5 : frame.minY + 8))
-                        .animation(.easeOut(duration: 0.12), value: frame)
-                }
-                if let window = layout.locate(drag.windowId)?.window {
-                    Text(window.content.title(model: model))
-                        .font(.system(size: 13))
-                        .foregroundStyle(palette.ink)
-                        .padding(.horizontal, 12)
-                        .frame(height: 28)
-                        .background(palette.box, in: .capsule)
-                        .overlay(Capsule().strokeBorder(palette.boxStroke, lineWidth: 0.5))
-                        .shadow(color: .black.opacity(0.2), radius: 10, y: 6)
-                        .fixedSize()
-                        .offset(x: drag.location.x + 12, y: drag.location.y + 10)
+        let hidden = layout.hiddenWindows(in: panel)
+        // 卡片固定宽度、整体居中，最多三列。
+        let columns = Array(repeating: GridItem(.fixed(200), spacing: 12), count: max(1, min(hidden.count, 3)))
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(hidden) { window in
+                AssistCard(title: window.content.title(model: model), detail: detail(window)) {
+                    withAnimation(Workbench.settle) { layout.reveal(window.id) }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .allowsHitTesting(false)
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.opacity)
+    }
+
+    private func detail(_ window: PanelWindow) -> String {
+        switch window.content {
+        case .sessions: return "会话列表"
+        case .conversation(let id):
+            guard let session = model.sessions[id] else { return "" }
+            let folder = session.cwd.map { URL(filePath: $0).lastPathComponent } ?? ""
+            return [folder, session.updatedAt.formatted(.relative(presentation: .named).locale(Locale(identifier: "zh-Hans")))].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+    }
+}
+
+private struct AssistCard: View {
+    let title: String
+    let detail: String
+    let pick: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: pick) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(palette.ink).lineLimit(1)
+                Text(detail).font(.system(size: 11)).foregroundStyle(palette.ink3).lineLimit(3)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 112, maxHeight: 112, alignment: .topLeading)
+            .card(palette)
+            .overlay {
+                RoundedRectangle(cornerRadius: Metrics.cardRadius).strokeBorder(palette.previewRing, lineWidth: hovering ? 1.5 : 0)
+            }
+            .offset(y: hovering ? -2 : 0)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.spring(duration: 0.16), value: hovering)
     }
 }
 
