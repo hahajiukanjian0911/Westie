@@ -23,6 +23,43 @@ const TOOL_SCRIPTS = {
   },
 }
 
+// `/md`：覆盖常见 Markdown 语法，用来核对渲染。
+const MARKDOWN_SAMPLE = [
+  '## 二级标题',
+  '',
+  '正文里有**加粗**、*斜体*、~~删除线~~、`行内代码`和[链接](https://example.com)。第二句话写长一点，看看换行之后的行距是否舒服，以及中英文 mixed text 的排版。',
+  '',
+  '### 三级标题',
+  '',
+  '- 无序列表第一项',
+  '- 第二项',
+  '  - 嵌套的子项',
+  '- 第三项',
+  '',
+  '1. 有序列表',
+  '2. 第二步',
+  '3. 第三步',
+  '',
+  '> 这是一段引用，用来放提示或摘录。',
+  '',
+  '| 名称 | 类型 | 说明 |',
+  '| --- | --- | --- |',
+  '| path | String | 文件路径 |',
+  '| force | Bool | 是否覆盖 |',
+  '',
+  '```swift',
+  '// 注释',
+  'let count = 42',
+  'func greet(_ name: String) -> String {',
+  '    return "hello \\(name)"',
+  '}',
+  '```',
+  '',
+  '---',
+  '',
+  '最后一段。',
+].join('\n')
+
 const plan = (body) => {
   // 辅助请求（会话标题）：短答复。
   if ((body.max_tokens ?? 0) <= 200 || !body.tools) return { text: '模拟会话' }
@@ -31,6 +68,7 @@ const plan = (body) => {
   const text = userText(body)
   const script = Object.entries(TOOL_SCRIPTS).find(([cue]) => text.startsWith(cue))?.[1]
   if (script) return { text: '我来调用一个工具。', tool: script }
+  if (text.startsWith('/md')) return { text: MARKDOWN_SAMPLE }
   return { text: `这是来自本地假模型的回复。\n\n你说的是：「${text.slice(0, 200)}」\n\n- 第一点\n- 第二点\n\n\`\`\`swift\nprint("hello westie")\n\`\`\`` }
 }
 

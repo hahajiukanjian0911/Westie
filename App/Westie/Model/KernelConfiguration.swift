@@ -25,7 +25,9 @@ struct KernelConfiguration {
         options.logFile = repoRoot.appending(path: "temp/logs/kernel.log")
 
         if let port = environment["WESTIE_MOCK_LLM"] {
-            location.dshHome = repoRoot.appending(path: "temp/dsh-home")
+            // 可用 WESTIE_DSH_HOME 另指一份测试数据，和已开着的假模型实例互不干扰。
+            location.dshHome = environment["WESTIE_DSH_HOME"].map { URL(filePath: $0) }
+                ?? repoRoot.appending(path: "temp/dsh-home")
             options.scrubCredentials = true
             options.environment["DEEPSEEK_API_KEY"] = "westie-mock"
             options.environment["DEEPSEEK_BASE_URL"] = "http://127.0.0.1:\(port)"
