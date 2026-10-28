@@ -19,6 +19,12 @@ struct RootView: View {
         switch model.phase {
         case .starting:
             ProgressView("正在启动内核…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .waitingForDSH:
+            ContentUnavailableView {
+                Label("DeepSeek Harness 正在运行", systemImage: "pause.circle")
+            } description: {
+                Text("Westie 和 DeepSeek Harness 共用 ~/.dsh 里的会话与工作区，同时运行会互相覆盖。退出 DeepSeek Harness 后，Westie 会自动继续。")
+            }
         case .reconnecting:
             ProgressView("正在重新连接内核…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):

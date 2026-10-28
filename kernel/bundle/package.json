@@ -10,6 +10,6 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
-  "engines": { "dsh": ">=0.2.1-rc.4 <0.3.0" },
+  "engines": { "dsh": ">=0.2.1-rc.3 <0.3.0" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
 }

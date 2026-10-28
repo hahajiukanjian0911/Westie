@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import WestieKit
@@ -43,6 +44,8 @@ struct ModelChoice: Hashable, Identifiable {
 final class AppModel {
     enum Phase: Equatable {
         case starting
+        /// DSH.app 正在使用 `~/.dsh`，等它退出再启动内核。
+        case waitingForDSH
         case ready
         case reconnecting
         case failed(String)
@@ -76,13 +79,77 @@ final class AppModel {
 
     // MARK: - 生命周期
 
+    static let dshBundleIdentifier = "com.deepseek.dsh"
+
+    var isDSHRunning: Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: Self.dshBundleIdentifier).isEmpty
+    }
+
+    var isMock: Bool { configuration.isMock }
+
     func start() async {
+        if configuration.sharesDSHHome {
+            watchDSHApp()
+            // 两个内核同时写 ~/.dsh 会互相覆盖 workspace.json：DSH.app 在跑就不启动。
+            guard !isDSHRunning else {
+                phase = .waitingForDSH
+                return
+            }
+        }
+        phase = .starting
         do {
             let kernel = KernelProcess(location: configuration.location, options: configuration.options)
             self.kernel = kernel
-            try await attach(endpoint: kernel.start())
+            let endpoint = try await kernel.start()
+            // 启动途中 DSH.app 起来了：已经让位，这个内核直接停掉。
+            guard phase == .starting else {
+                await kernel.stop()
+                return
+            }
+            try await attach(endpoint: endpoint)
         } catch {
-            phase = .failed(String(describing: error))
+            if phase == .starting { phase = .failed(String(describing: error)) }
+        }
+    }
+
+    /// DSH.app 退出 → 若在等待就启动内核；DSH.app 启动 → 立即停掉我们的内核，把 ~/.dsh 让给它。
+    private func watchDSHApp() {
+        guard dshObservers.isEmpty else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        dshObservers = [
+            center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+                guard AppModel.isDSH(note) else { return }
+                MainActor.assumeIsolated {
+                    guard let self, self.phase == .waitingForDSH, !self.isDSHRunning else { return }
+                    Task { await self.start() }
+                }
+            },
+        ]
+        for name in [NSWorkspace.willLaunchApplicationNotification, NSWorkspace.didLaunchApplicationNotification] {
+            dshObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard AppModel.isDSH(note) else { return }
+                MainActor.assumeIsolated { self?.yieldToDSH() }
+            })
+        }
+    }
+
+    private var dshObservers: [NSObjectProtocol] = []
+
+    private nonisolated static func isDSH(_ note: Notification) -> Bool {
+        (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
+            == "com.deepseek.dsh"
+    }
+
+    private func yieldToDSH() {
+        guard phase != .waitingForDSH else { return }
+        let handles = prepareShutdown()
+        phase = .waitingForDSH
+        conversation = nil
+        connection = nil
+        kernel = nil
+        Task.detached {
+            await handles.connection?.disconnect()
+            await handles.kernel?.stop()
         }
     }
 
@@ -124,6 +191,10 @@ final class AppModel {
     /// 连接断开：内核还活着就重新接入，否则重启内核。最多重试 5 次，间隔递增。
     private func connectionLost(endpoint: KernelEndpoint) async {
         guard phase == .ready else { return }
+        if configuration.sharesDSHHome, isDSHRunning {
+            yieldToDSH()
+            return
+        }
         phase = .reconnecting
         for attempt in 1...5 {
             try? await Task.sleep(for: .milliseconds(300 * attempt))
@@ -131,6 +202,7 @@ final class AppModel {
                 if let kernel, await kernel.isRunning {
                     try await attach(endpoint: endpoint)
                 } else {
+                    if configuration.sharesDSHHome, isDSHRunning { yieldToDSH(); return }
                     let kernel = KernelProcess(location: configuration.location, options: configuration.options)
                     self.kernel = kernel
                     try await attach(endpoint: kernel.start())

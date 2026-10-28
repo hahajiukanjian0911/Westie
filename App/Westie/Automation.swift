@@ -7,7 +7,10 @@ import WestieKit
 /// 只调用 App 自己的模型方法、截自己窗口的内容，不合成任何鼠标键盘事件，也不前置窗口。
 ///
 /// 步骤：`workspace:<路径>` `new` `prompt:<文本>` `wait:<秒>` `idle`（等回合结束）
-///      `approve` `reject` `answer:<选项>` `shot:<png 路径>` `quit`
+///      `approve` `reject` `answer:<选项>` `select:<序号>` `shot:<png 路径>` `dump` `quit`
+///
+/// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
+/// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
 @MainActor
 enum Automation {
     static func runIfRequested(model: AppModel) async {
@@ -23,14 +26,29 @@ enum Automation {
                 try? data.write(to: log)
             }
         }
-        guard model.phase == .ready else { note("FAIL 内核未就绪：\(model.phase)"); return }
-        note("ready")
+        guard model.phase == .ready else {
+            note("FAIL 内核未就绪：\(model.phase)")
+            if script.hasSuffix("quit") { RunLoop.main.perform { NSApp.terminate(nil) } }
+            return
+        }
+        note("ready mock=\(model.isMock)")
+        let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer"]
 
         for step in script.split(separator: ";").map({ $0.trimmingCharacters(in: .whitespaces) }) where !step.isEmpty {
             let (verb, argument) = step.firstIndex(of: ":").map {
                 (String(step[..<$0]), String(step[step.index(after: $0)...]))
             } ?? (step, "")
+            if !model.isMock, writingSteps.contains(verb) {
+                note("REFUSED \(step)：连的是真实数据，只允许只读步骤")
+                continue
+            }
             switch verb {
+            case "select":
+                await until { !model.board.ordered.isEmpty }
+                let all = model.board.ordered.flatMap { model.sessions(in: $0) }
+                guard let index = Int(argument), all.indices.contains(index) else { note("FAIL 没有第 \(argument) 个会话"); continue }
+                model.selectedSessionId = all[index].id
+                await until { model.conversation?.isLoading == false }
             case "workspace":
                 if !model.board.ordered.contains(where: { $0.path == argument }) {
                     await model.addWorkspace(path: argument)
