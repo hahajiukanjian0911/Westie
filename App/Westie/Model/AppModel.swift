@@ -58,14 +58,13 @@ final class AppModel {
     private(set) var questions: [PendingQuestion] = []
     private(set) var models: [ModelChoice] = []
     private(set) var defaultModel: ModelChoice?
-    private(set) var conversation: ConversationModel?
-
-    var selectedSessionId: String? {
-        didSet {
-            guard selectedSessionId != oldValue else { return }
-            openConversation()
-        }
-    }
+    /// 正在显示的会话（由面板布局告知），每个跟读一条 `session/follow`。
+    private(set) var conversations: [String: ConversationModel] = [:]
+    /// 当前聚焦的会话：侧栏高亮、新建会话后跳转都通过它与面板布局同步。
+    var selectedSessionId: String?
+    /// 聚焦会话的对话（自动化脚本用）。
+    var conversation: ConversationModel? { selectedSessionId.flatMap { conversations[$0] } }
+    private var wantedConversations: Set<String> = []
 
     private var kernel: KernelProcess?
     private var connection: KernelConnection?
@@ -144,7 +143,7 @@ final class AppModel {
         guard phase != .waitingForDSH else { return }
         let handles = prepareShutdown()
         phase = .waitingForDSH
-        conversation = nil
+        conversations = [:]
         connection = nil
         kernel = nil
         Task.detached {
@@ -158,7 +157,7 @@ final class AppModel {
         phase = .failed("正在退出")
         connectionTasks.forEach { $0.cancel() }
         connectionTasks = []
-        conversation?.close()
+        conversations.values.forEach { $0.close() }
         return (connection, kernel)
     }
 
@@ -185,7 +184,9 @@ final class AppModel {
         try await refreshSessions()
         try await loadModels()
         phase = .ready
-        if selectedSessionId != nil { openConversation() }
+        conversations.values.forEach { $0.close() }
+        conversations = [:]
+        retainConversations(wantedConversations)
     }
 
     /// 连接断开：内核还活着就重新接入，否则重启内核。最多重试 5 次，间隔递增。
@@ -357,7 +358,7 @@ final class AppModel {
         if let effort { request["reasoningEffort"] = .string(effort) }
         do {
             _ = try await connection.call("session/selectModel", ["request": .object(request)])
-            conversation?.modelOverride = (choice, effort)
+            conversations[sessionId]?.modelOverride = (choice, effort)
         } catch {
             report(error)
         }
@@ -413,13 +414,19 @@ final class AppModel {
 
     // MARK: - 会话
 
-    private func openConversation() {
-        conversation?.close()
-        conversation = nil
-        guard let sessionId = selectedSessionId, let connection, phase == .ready else { return }
-        let model = ConversationModel(sessionId: sessionId)
-        conversation = model
-        model.open(on: connection)
+    /// 只为正在显示的会话保持跟读：新出现的打开，不再显示的关掉。
+    func retainConversations(_ ids: Set<String>) {
+        wantedConversations = ids
+        for (id, conversation) in conversations where !ids.contains(id) {
+            conversation.close()
+            conversations[id] = nil
+        }
+        guard let connection, phase == .ready else { return }
+        for id in ids where conversations[id] == nil {
+            let conversation = ConversationModel(sessionId: id)
+            conversations[id] = conversation
+            conversation.open(on: connection)
+        }
     }
 
     private(set) var lastError: String?

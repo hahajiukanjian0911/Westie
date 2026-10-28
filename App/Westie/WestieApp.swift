@@ -7,16 +7,17 @@ struct WestieApp: App {
 
     var body: some Scene {
         Window("Westie", id: "main") {
-            RootView(model: appDelegate.model)
+            RootView(model: appDelegate.model, layout: appDelegate.layout)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     await appDelegate.model.start()
                     #if DEBUG
-                    await Automation.runIfRequested(model: appDelegate.model)
+                    await Automation.runIfRequested(model: appDelegate.model, layout: appDelegate.layout)
                     #endif
                 }
         }
         .defaultSize(width: 1100, height: 720)
+        .commands { PanelCommands(layout: appDelegate.layout) }
     }
 }
 
@@ -27,6 +28,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             fatalError("无法定位开发期内核：\(error)")
         }
+    }()
+
+    /// 自动化测试用单独的存储，不动日常使用的面板布局。
+    @MainActor let layout: PanelLayout = {
+        guard ProcessInfo.processInfo.environment["WESTIE_AUTOMATION"] != nil,
+              let defaults = UserDefaults(suiteName: "com.hahajiukanjian.westie.automation")
+        else { return PanelLayout() }
+        if ProcessInfo.processInfo.environment["WESTIE_LAYOUT_KEEP"] == nil {
+            defaults.removePersistentDomain(forName: "com.hahajiukanjian.westie.automation")
+        }
+        return PanelLayout(defaults: defaults)
     }()
 
     /// 等内核排空持久化后再退出（KernelProcess.stop 最多等 5 秒）。
@@ -44,4 +56,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
+/// 菜单栏「面板」：显示或收起各面板，找回会话列表。
+private struct PanelCommands: Commands {
+    let layout: PanelLayout
+
+    var body: some Commands {
+        CommandMenu("面板") {
+            Button("主边栏") { layout.toggle(.primary) }
+                .keyboardShortcut("s", modifiers: [.control, .command])
+                .disabled(!layout.canToggle(.primary))
+            Button("侧边栏") { layout.toggle(.secondary) }
+                .keyboardShortcut("s", modifiers: [.control, .option, .command])
+                .disabled(!layout.canToggle(.secondary))
+            Button("顶部面板") { layout.toggle(.top) }
+                .disabled(!layout.canToggle(.top))
+            Button("底部面板") { layout.toggle(.bottom) }
+                .keyboardShortcut("j", modifiers: .command)
+                .disabled(!layout.canToggle(.bottom))
+            Divider()
+            Button("显示会话列表") { layout.showSessions() }
+        }
+    }
 }

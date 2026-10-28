@@ -4,6 +4,7 @@ import WestieKit
 
 struct SidebarView: View {
     @Bindable var model: AppModel
+    let layout: PanelLayout
 
     var body: some View {
         List(selection: $model.selectedSessionId) {
@@ -12,6 +13,10 @@ struct SidebarView: View {
                     ForEach(model.sessions(in: workspace)) { session in
                         SessionRow(session: session, pending: model.pendingCount(for: session.id))
                             .tag(session.id)
+                            .contextMenu {
+                                Button("在新窗口打开") { layout.openConversation(session.id, mode: .newWindow) }
+                                Button("并排打开") { layout.openConversation(session.id, mode: .sideBySide) }
+                            }
                     }
                 } header: {
                     HStack {

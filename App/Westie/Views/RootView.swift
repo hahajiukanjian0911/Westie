@@ -3,21 +3,50 @@ import WestieKit
 
 struct RootView: View {
     @Bindable var model: AppModel
+    let layout: PanelLayout
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(model: model)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
-        } detail: {
-            detail
+        Group {
+            if model.phase == .ready {
+                Workbench(layout: layout, model: model)
+            } else {
+                status
+            }
         }
         .overlay(alignment: .top) { errorBanner }
+        .navigationTitle(layout.focusedSessionId.flatMap { model.sessions[$0]?.displayTitle } ?? "Westie")
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                toggle(.primary, symbol: "sidebar.left")
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                toggle(.top, symbol: "rectangle.topthird.inset.filled")
+                toggle(.bottom, symbol: "rectangle.bottomthird.inset.filled")
+                toggle(.secondary, symbol: "sidebar.right")
+            }
+        }
+        // 侧栏选中、新建会话 → 在面板里打开；聚焦的对话窗口变了 → 侧栏跟着高亮。
+        .onChange(of: model.selectedSessionId) { _, id in
+            if let id { layout.openConversation(id) }
+        }
+        .onChange(of: layout.focusedSessionId, initial: true) { _, id in
+            if let id, id != model.selectedSessionId { model.selectedSessionId = id }
+        }
+        .onChange(of: layout.visibleSessionIds, initial: true) { _, ids in
+            model.retainConversations(ids)
+        }
+    }
+
+    private func toggle(_ panel: PanelID, symbol: String) -> some View {
+        Button(panel.title, systemImage: symbol) { layout.toggle(panel) }
+            .help("显示或收起\(panel.title)")
+            .disabled(!layout.canToggle(panel))
     }
 
     @ViewBuilder
-    private var detail: some View {
+    private var status: some View {
         switch model.phase {
-        case .starting:
+        case .starting, .ready:
             ProgressView("正在启动内核…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case .waitingForDSH:
             ContentUnavailableView {
@@ -29,21 +58,6 @@ struct RootView: View {
             ProgressView("正在重新连接内核…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):
             ContentUnavailableView("内核不可用", systemImage: "exclamationmark.triangle", description: Text(message))
-        case .ready:
-            if let conversation = model.conversation {
-                ConversationView(model: model, conversation: conversation)
-                    .id(conversation.sessionId)
-            } else if model.board.ordered.isEmpty {
-                ContentUnavailableView {
-                    Label("还没有工作区", systemImage: "folder")
-                } description: {
-                    Text("打开一个文件夹，在里面开始会话。")
-                } actions: {
-                    Button("打开文件夹…") { SidebarView.chooseFolder(model: model) }
-                }
-            } else {
-                ContentUnavailableView("选择或新建一个会话", systemImage: "bubble.left.and.bubble.right")
-            }
         }
     }
 

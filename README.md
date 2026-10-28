@@ -11,6 +11,8 @@ DeepSeek Harness（DSH）的原生 macOS 客户端：沿用 DSH 内核，界面�
 | `App/Westie` | App：`AppModel`（生命周期、会话、审批与提问）、`ConversationModel`、界面 |
 | `scripts/` | 开发工具：`kernel.sh` 单独起内核、`probe.mjs` 链路探针、`mock-llm.mjs` 假模型、`dump-remote.mjs` 导出接口描述符 |
 
+界面由五个平级的面板组成：顶部、主边栏、对话、侧边栏、底部（`PanelLayout`、`Workbench`）。面板只管位置、尺寸和收起；内容是窗口，一个面板里的窗口可以并排显示或收着，窗口能拖到别的面板。布局保存在 UserDefaults，不写 `~/.dsh`。
+
 App 启动时拉起内核（Node 子进程，profile `westie`），用启动令牌经 `/connect` 接入，一元调用走 `POST /api/<方法>`，流走 WebSocket `/api/remote.mux`。
 
 ## 开发

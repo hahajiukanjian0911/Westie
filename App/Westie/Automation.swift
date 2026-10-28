@@ -8,12 +8,14 @@ import WestieKit
 ///
 /// 步骤：`workspace:<路径>` `new` `prompt:<文本>` `wait:<秒>` `idle`（等回合结束）
 ///      `approve` `reject` `answer:<选项>` `select:<序号>` `shot:<png 路径>` `dump` `quit`
+///      面板：`split:<序号>`（并排打开第 n 个会话） `move:<面板>`（聚焦窗口移到 top/primary/center/secondary/bottom）
+///      `toggle:<面板>` `hide`（收起聚焦窗口） `layout`（记录各面板的窗口）
 ///
 /// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
 @MainActor
 enum Automation {
-    static func runIfRequested(model: AppModel) async {
+    static func runIfRequested(model: AppModel, layout: PanelLayout) async {
         guard let script = ProcessInfo.processInfo.environment["WESTIE_AUTOMATION"] else { return }
         let log = ProcessInfo.processInfo.environment["WESTIE_AUTOMATION_LOG"].map { URL(filePath: $0) }
         func note(_ line: String) {
@@ -43,6 +45,29 @@ enum Automation {
                 continue
             }
             switch verb {
+            case "split":
+                await until { !model.board.ordered.isEmpty }
+                let all = model.board.ordered.flatMap { model.sessions(in: $0) }
+                guard let index = Int(argument), all.indices.contains(index) else { note("FAIL 没有第 \(argument) 个会话"); continue }
+                layout.openConversation(all[index].id, mode: .sideBySide)
+                await until { model.conversations[all[index].id]?.isLoading == false }
+            case "move", "toggle":
+                guard let panel = PanelID(rawValue: argument) else { note("FAIL 没有面板 \(argument)"); continue }
+                if verb == "toggle" {
+                    layout.toggle(panel)
+                } else if let id = layout.focusedWindowId {
+                    layout.move(id, to: panel)
+                }
+            case "hide":
+                if let id = layout.focusedWindowId { layout.hide(id) }
+            case "layout":
+                for panel in PanelID.allCases {
+                    let shown = layout.shownWindows(in: panel).map {
+                        "\($0.content.title(model: model))\($0.id == layout.focusedWindowId ? "[聚焦]" : "")"
+                    }
+                    let hidden = layout.hiddenWindows(in: panel).map { $0.content.title(model: model) }
+                    note("panel \(panel.rawValue) visible=\(layout.isVisible(panel)) shown=[\(shown.joined(separator: ", "))] hidden=[\(hidden.joined(separator: ", "))]")
+                }
             case "select":
                 await until { !model.board.ordered.isEmpty }
                 let all = model.board.ordered.flatMap { model.sessions(in: $0) }
@@ -60,8 +85,12 @@ enum Automation {
                 await until { model.conversation?.isLoading == false }
             case "prompt":
                 guard let id = model.selectedSessionId else { note("FAIL 没有选中会话"); continue }
+                let before = model.conversation?.transcript.items.count ?? 0
                 await model.send(argument, to: id)
-                await until { model.conversation?.transcript.running == true }
+                // 假模型很快，可能还没看到“运行中”就已经回完了。
+                await until {
+                    model.conversation?.transcript.running == true || (model.conversation?.transcript.items.count ?? 0) > before
+                }
             case "idle":
                 await until(timeout: 20) {
                     model.conversation?.transcript.running == false

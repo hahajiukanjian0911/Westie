@@ -59,6 +59,5 @@ struct ConversationView: View {
                 .padding(.bottom, 16)
                 .frame(maxWidth: .infinity)
         }
-        .navigationTitle(model.sessions[conversation.sessionId]?.displayTitle ?? "会话")
     }
 }
