@@ -6,3 +6,5 @@ node_modules/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+Westie.xcodeproj/
+.swiftpm/

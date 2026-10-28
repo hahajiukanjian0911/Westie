@@ -1,0 +1,15 @@
+{
+  "name": "@westie/kernel-bundle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Westie 内核组合包：关掉 dsh-web-app 里只服务浏览器界面的行，界面由原生 App 绘制",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "engines": { "dsh": ">=0.2.1-rc.4 <0.3.0" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

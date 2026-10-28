@@ -1,0 +1,35 @@
+name: Westie
+options:
+  bundleIdPrefix: com.hahajiukanjian
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  WestieKit:
+    path: Packages/WestieKit
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Westie:
+    type: application
+    platform: macOS
+    sources: [App/Westie]
+    dependencies:
+      - package: WestieKit
+    info:
+      path: App/Westie/Info.plist
+      properties:
+        CFBundleDisplayName: Westie
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hahajiukanjian.westie
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_APP_SANDBOX: NO
