@@ -3,6 +3,7 @@ import WestieKit
 
 struct TranscriptItemView: View {
     let item: Transcript.Item
+    @Environment(\.palette) private var palette
 
     var body: some View {
         switch item {
@@ -12,7 +13,7 @@ struct TranscriptItemView: View {
                 Text(text)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(.quaternary, in: .rect(cornerRadius: 12))
+                    .background(palette.bubble, in: .rect(cornerRadius: 10))
             }
         case .reasoning(_, let text):
             ReasoningView(text: text, streaming: false)
@@ -22,7 +23,7 @@ struct TranscriptItemView: View {
             ToolCallView(call: call)
         case .notice(_, let text):
             Label(text, systemImage: "info.circle")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(palette.ink3)
         }
     }
 }
@@ -46,17 +47,18 @@ struct ReasoningView: View {
     let text: String
     let streaming: Bool
     @State private var expanded = false
+    @Environment(\.palette) private var palette
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             Text(text)
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(palette.ink3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
         } label: {
             Text(streaming ? "思考中…" : "思考过程")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(palette.ink3)
         }
     }
 }
@@ -64,6 +66,7 @@ struct ReasoningView: View {
 struct ToolCallView: View {
     let call: Transcript.ToolCall
     @State private var expanded = false
+    @Environment(\.palette) private var palette
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
@@ -76,7 +79,7 @@ struct ToolCallView: View {
                 }
                 .frame(maxHeight: 240)
                 .padding(8)
-                .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 6))
+                .background(palette.code, in: .rect(cornerRadius: 10))
             }
         } label: {
             HStack(spacing: 6) {
@@ -84,10 +87,10 @@ struct ToolCallView: View {
                     ProgressView().controlSize(.mini)
                 } else {
                     Image(systemName: call.isError ? "xmark.circle" : "checkmark.circle")
-                        .foregroundStyle(call.isError ? .red : .secondary)
+                        .foregroundStyle(call.isError ? palette.bad : palette.ink3)
                 }
-                Text(call.name).font(.system(.callout, design: .monospaced))
-                Text(call.summary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                Text(call.name).font(.system(.callout, design: .monospaced)).foregroundStyle(palette.ink2)
+                Text(call.summary).font(.callout).foregroundStyle(palette.ink3).lineLimit(1)
             }
         }
     }
@@ -96,6 +99,7 @@ struct ToolCallView: View {
 /// 轻量 Markdown：围栏代码块等宽显示，其余按行内语法渲染并保留换行。
 struct MarkdownText: View {
     let text: String
+    @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -105,8 +109,9 @@ struct MarkdownText: View {
                         .font(.system(.callout, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 6))
+                        .foregroundStyle(palette.ink2)
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .background(palette.code, in: .rect(cornerRadius: 10))
                 } else {
                     Text(Self.inline(segment.text))
                         .textSelection(.enabled)

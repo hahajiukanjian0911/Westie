@@ -8,10 +8,11 @@ struct ComposerView: View {
     let running: Bool
     @State private var draft = ""
     @FocusState private var focused: Bool
+    @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("给 Agent 发消息", text: $draft, axis: .vertical)
+            TextField("给 Agent 发消息", text: $draft, prompt: Text("给 Agent 发消息").foregroundStyle(palette.ink4), axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...10)
                 .focused($focused)
@@ -32,13 +33,14 @@ struct ComposerView: View {
                 }
                 Button("发送", systemImage: "arrow.up") { send() }
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(SendButtonStyle())
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(12)
-        .background(.background, in: .rect(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
+        .background(palette.box, in: .rect(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(palette.boxStroke, lineWidth: 0.5))
+        .shadow(color: palette.boxShadow, radius: 4, y: 2)
         .onAppear { focused = true }
     }
 
@@ -129,5 +131,22 @@ private struct ModelPicker: View {
         let efforts = choice.efforts
         let effort = efforts.isEmpty ? nil : efforts[min(Int(effortIndex), efforts.count - 1)]
         Task { await model.selectModel(choice, effort: effort, for: conversation.sessionId) }
+    }
+}
+
+/// 发送：强调色圆按钮，没内容时变淡（同主窗口 v7）。
+private struct SendButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(palette.onAccent)
+            .frame(width: 28, height: 28)
+            .background(palette.accent, in: .circle)
+            .opacity(enabled ? 1 : 0.35)
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.easeOut(duration: 0.24), value: configuration.isPressed)
     }
 }

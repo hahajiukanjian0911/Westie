@@ -14,7 +14,7 @@ struct ConversationView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     if conversation.hasEarlierHistory {
                         Text("更早的消息暂未加载")
                             .font(.caption).foregroundStyle(.tertiary)
@@ -41,7 +41,8 @@ struct ConversationView: View {
                 }
                 .frame(maxWidth: 760, alignment: .leading)
                 .padding(.horizontal, 24)
-                .padding(.vertical, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
@@ -55,7 +56,7 @@ struct ConversationView: View {
 
             ComposerView(model: model, conversation: conversation, running: running)
                 .frame(maxWidth: 760)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 16)
                 .padding(.bottom, 16)
                 .frame(maxWidth: .infinity)
         }

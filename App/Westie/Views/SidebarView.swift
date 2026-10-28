@@ -2,43 +2,40 @@ import AppKit
 import SwiftUI
 import WestieKit
 
+/// 会话列表窗口：直接坐在外框上，按工作区分组（沿用主窗口 v7 侧栏的行样式）。
 struct SidebarView: View {
     @Bindable var model: AppModel
     let layout: PanelLayout
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        List(selection: $model.selectedSessionId) {
-            ForEach(model.board.ordered) { workspace in
-                Section {
-                    ForEach(model.sessions(in: workspace)) { session in
-                        SessionRow(session: session, pending: model.pendingCount(for: session.id))
-                            .tag(session.id)
-                            .contextMenu {
-                                Button("在新窗口打开") { layout.openConversation(session.id, mode: .newWindow) }
-                                Button("并排打开") { layout.openConversation(session.id, mode: .sideBySide) }
-                            }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 1) {
+                ForEach(model.board.ordered) { workspace in
+                    WorkspaceHeader(title: workspace.title) {
+                        Task { await model.newSession(in: workspace) }
                     }
-                } header: {
-                    HStack {
-                        Text(workspace.title)
-                        Spacer()
-                        Button("新会话", systemImage: "plus") {
-                            Task { await model.newSession(in: workspace) }
+                    ForEach(model.sessions(in: workspace)) { session in
+                        SessionRow(
+                            session: session,
+                            pending: model.pendingCount(for: session.id),
+                            selected: session.id == model.selectedSessionId
+                        ) {
+                            model.selectedSessionId = session.id
+                            layout.openConversation(session.id)
                         }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .help("在 \(workspace.title) 中新建会话")
+                        .contextMenu {
+                            Button("在新窗口打开") { layout.openConversation(session.id, mode: .newWindow) }
+                            Button("并排打开") { layout.openConversation(session.id, mode: .sideBySide) }
+                        }
                     }
                 }
             }
+            .padding(.bottom, 16)
         }
-        .listStyle(.sidebar)
-        .toolbar {
-            ToolbarItem {
-                Button("打开文件夹", systemImage: "folder.badge.plus") { Self.chooseFolder(model: model) }
-                    .help("添加工作区")
-                    .disabled(model.phase != .ready)
-            }
+        .scrollIndicators(.never)
+        .mask {
+            LinearGradient(stops: [.init(color: .black, location: 0.94), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
         }
     }
 
@@ -53,23 +50,71 @@ struct SidebarView: View {
     }
 }
 
+/// 分组标题：工作区名，悬停时右侧出现新会话按钮。
+private struct WorkspaceHeader: View {
+    let title: String
+    let newSession: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(palette.ink3)
+                .lineLimit(1)
+            Spacer()
+            Button("新会话", systemImage: "plus", action: newSession)
+                .labelStyle(.iconOnly)
+                .buttonStyle(IconButtonStyle())
+                .help("在 \(title) 中新建会话")
+                .opacity(hovering ? 1 : 0)
+        }
+        .padding(.leading, 8)
+        .frame(height: 28)
+        .padding(.top, 12)
+        .onHover { hovering = $0 }
+    }
+}
+
 private struct SessionRow: View {
     let session: SessionSummary
     let pending: Int
+    let selected: Bool
+    let open: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(session.displayTitle)
-                .lineLimit(1)
-                .foregroundStyle(session.blank ? .secondary : .primary)
-            Spacer(minLength: 4)
-            if pending > 0 {
-                Image(systemName: "hand.raised.fill")
-                    .foregroundStyle(.orange)
-                    .help("等待你处理")
-            } else if session.running {
-                ProgressView().controlSize(.mini)
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Text(session.displayTitle)
+                    .lineLimit(1)
+                    .foregroundStyle(selected || hovering ? palette.ink : session.blank ? palette.ink3 : palette.ink2)
+                Spacer(minLength: 4)
+                if pending > 0 {
+                    Circle().fill(palette.warn).frame(width: 6, height: 6)
+                        .help("等待你处理")
+                } else if session.running {
+                    ProgressView().controlSize(.mini)
+                }
             }
+            .font(.system(size: 13))
+            .padding(.horizontal, 8)
+            .frame(height: 32)
+            .background {
+                RoundedRectangle(cornerRadius: Metrics.rowRadius)
+                    .fill(selected ? palette.rowOn : hovering ? palette.rowHover : .clear)
+                    .overlay {
+                        if selected {
+                            RoundedRectangle(cornerRadius: Metrics.rowRadius).strokeBorder(palette.rowOnStroke, lineWidth: 0.5)
+                        }
+                    }
+                    .shadow(color: selected ? palette.cardShadowNear : .clear, radius: 1, y: 1)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }

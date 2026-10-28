@@ -9,7 +9,7 @@ import WestieKit
 /// 步骤：`workspace:<路径>` `new` `prompt:<文本>` `wait:<秒>` `idle`（等回合结束）
 ///      `approve` `reject` `answer:<选项>` `select:<序号>` `shot:<png 路径>` `dump` `quit`
 ///      面板：`split:<序号>`（并排打开第 n 个会话） `move:<面板>`（聚焦窗口移到 top/primary/center/secondary/bottom）
-///      `toggle:<面板>` `hide`（收起聚焦窗口） `layout`（记录各面板的窗口）
+///      `toggle:<面板>` `hide` `appearance:dark|light`（收起聚焦窗口） `layout`（记录各面板的窗口）
 ///
 /// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
@@ -58,6 +58,10 @@ enum Automation {
                 } else if let id = layout.focusedWindowId {
                     layout.move(id, to: panel)
                 }
+            case "appearance":
+                // 只改 App 自己的外观，不动系统深浅色。
+                NSApp.appearance = NSAppearance(named: argument == "dark" ? .darkAqua : .aqua)
+                try? await Task.sleep(for: .milliseconds(300))
             case "hide":
                 if let id = layout.focusedWindowId { layout.hide(id) }
             case "layout":

@@ -322,13 +322,18 @@ final class PanelLayout {
         guard let center = panelFrames[.center] else { return [:] }
         var zones: [PanelID: CGRect] = [:]
         let thickness: CGFloat = 64
+        let bounds = bounds.insetBy(dx: 8, dy: 8)
         if !isVisible(.primary) {
             zones[.primary] = CGRect(x: bounds.minX, y: bounds.minY, width: thickness, height: bounds.height)
         }
         if !isVisible(.secondary) {
             zones[.secondary] = CGRect(x: bounds.maxX - thickness, y: bounds.minY, width: thickness, height: bounds.height)
         }
-        let inset = center.insetBy(dx: thickness, dy: 0)
+        let inset = CGRect(
+            x: center.minX + (isVisible(.primary) ? 0 : thickness + 8), y: center.minY,
+            width: center.width - (isVisible(.primary) ? 0 : thickness + 8) - (isVisible(.secondary) ? 0 : thickness + 8),
+            height: center.height
+        )
         if !isVisible(.top) {
             zones[.top] = CGRect(x: inset.minX, y: center.minY, width: inset.width, height: thickness)
         }

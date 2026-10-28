@@ -16,6 +16,7 @@ struct WestieApp: App {
                     #endif
                 }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 720)
         .commands { PanelCommands(layout: appDelegate.layout) }
     }
