@@ -1,0 +1,9 @@
+{
+  "name": "westie-kernel",
+  "private": true,
+  "description": "Westie 自带的 DSH 内核（只含 Host，不含浏览器界面）",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.4",
+    "@deepseek-ai/dsh-web-app": "0.2.1-rc.4"
+  }
+}

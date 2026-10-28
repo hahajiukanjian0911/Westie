@@ -1,0 +1,8 @@
+temp/
+outputs/
+.DS_Store
+node_modules/
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
