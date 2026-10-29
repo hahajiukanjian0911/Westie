@@ -23,6 +23,8 @@ public struct Transcript: Sendable, Equatable {
         public var arguments: JSONValue
         public var result: String?
         public var isError = false
+        /// 结果回来的时间。
+        public var finishedAt: Date?
 
         public var isRunning: Bool { result == nil }
 
@@ -42,6 +44,8 @@ public struct Transcript: Sendable, Equatable {
     }
 
     public private(set) var items: [Item] = []
+    /// 每条条目落盘时的事件时间（按条目 id）。
+    public private(set) var times: [String: Date] = [:]
     public private(set) var live: Live?
     public private(set) var running = false
     public private(set) var lastSeq = -1
@@ -83,6 +87,7 @@ public struct Transcript: Sendable, Equatable {
         let all = older + events
         let keptLive = live
         items = []
+        times = [:]
         toolIndex = [:]
         events = []
         lastSeq = -1
@@ -96,6 +101,11 @@ public struct Transcript: Sendable, Equatable {
         lastSeq = seq
         events.append(event)
         let data = event["data"] ?? .null
+        let time: Date? = if case .number(let ms) = event["time"] { Date(timeIntervalSince1970: ms / 1000) } else { nil }
+        let before = items.count
+        defer {
+            if let time { for item in items[before...] { times[item.id] = time } }
+        }
 
         switch event["type"]?.stringValue {
         case "user/message":
@@ -129,6 +139,7 @@ public struct Transcript: Sendable, Equatable {
             else { return }
             call.result = Self.text(of: message["content"])
             call.isError = message["isError"]?.boolValue ?? false
+            call.finishedAt = time
             items[index] = .tool(call)
         case "turn/start":
             running = true

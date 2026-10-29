@@ -38,6 +38,17 @@ extension Transcript {
         return blocks
     }
 
+    /// 一段过程的起止：从前一条（用户消息或上一段正文）落盘起，到最后一步结束。
+    public func span(of steps: [Item], after previousId: String?) -> (start: Date, end: Date)? {
+        let start = previousId.flatMap { times[$0] } ?? steps.first.flatMap { times[$0.id] }
+        let end = steps.compactMap { step -> Date? in
+            if case .tool(let call) = step { return call.finishedAt ?? times[call.id] }
+            return times[step.id]
+        }.max()
+        guard let start, let end, end >= start else { return nil }
+        return (start, end)
+    }
+
     public static func processId(after block: Block?) -> String {
         "after-\(block?.id ?? "start")"
     }

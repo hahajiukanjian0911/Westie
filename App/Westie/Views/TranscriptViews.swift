@@ -42,13 +42,17 @@ struct LiveMessageView: View {
     }
 }
 
-/// 两段正文之间的一段过程：收起时只占一行摘要，运行中这一行原地换成当前一步。
-/// 设计稿 deliverables/Westie/reviews/2026-10-29-tool-steps/v1。
+/// 两段正文之间的一段过程：收起时只占一行摘要，运行中这一行原地换成当前一步或正在想的那一句。
+/// 设计稿 deliverables/Westie/reviews/2026-10-29-tool-steps/v2。
 struct ProcessView: View {
     let steps: [Transcript.Item]
     /// 还在流式生成、没落盘的思考。
     var liveReasoning: String?
     var active = false
+    /// 总用时（结束后显示在摘要末尾）。
+    var duration: TimeInterval?
+    /// 每一步的时间（悬停时显示）。
+    var times: [String: Date] = [:]
     #if DEBUG
     // 后台截图用：WESTIE_PROCESS_EXPANDED=1 时默认展开
     @State private var expanded = ProcessInfo.processInfo.environment["WESTIE_PROCESS_EXPANDED"] == "1"
@@ -63,6 +67,10 @@ struct ProcessView: View {
         steps.compactMap { if case .tool(let call) = $0 { call } else { nil } }
     }
 
+    private var runningCall: Transcript.ToolCall? {
+        liveReasoning?.isEmpty == false ? nil : calls.last(where: \.isRunning)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
@@ -71,22 +79,19 @@ struct ProcessView: View {
                 withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    if active {
-                        ProgressView().controlSize(.mini).frame(width: 9, height: 9).scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(palette.ink4)
-                            .rotationEffect(.degrees(expanded ? 90 : 0))
-                            .frame(width: 9, height: 9)
-                    }
+                    icon
                     label
                         .id(labelKey)
                         .transition(.asymmetric(
                             insertion: .offset(y: 6).combined(with: .opacity),
                             removal: .offset(y: -6).combined(with: .opacity)
                         ))
-                        .lineLimit(1).truncationMode(.middle)
+                        .lineLimit(1).truncationMode(.tail)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(palette.ink4)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .opacity(hovering || expanded ? 1 : 0)
                 }
                 .uiFont(12)
                 .foregroundStyle(hovering ? palette.ink2 : palette.ink3)
@@ -100,13 +105,14 @@ struct ProcessView: View {
             .padding(.leading, -6)
             .onHover { hovering = $0 }
             .animation(.smooth(duration: 0.22), value: labelKey)
+            .animation(.easeOut(duration: 0.15), value: hovering)
             .accessibilityValue(expanded ? "已展开" : "已收起")
 
             Reveal(open: expanded) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(steps) { step in ProcessStepRow(step: step) }
+                    ForEach(steps) { step in ProcessStepRow(step: step, time: times[step.id]) }
                     if let liveReasoning, !liveReasoning.isEmpty {
-                        ProcessStepRow(step: .reasoning(id: "live", text: liveReasoning))
+                        ProcessStepRow(step: .reasoning(id: "live", text: liveReasoning), time: nil, live: true)
                     }
                 }
                 .padding(.leading, 12)
@@ -123,19 +129,39 @@ struct ProcessView: View {
         #endif
     }
 
-    /// 运行中显示当前一步；结束后显示按类计数的摘要。
+    /// 完成后是工具箱（只有思考时是灯泡）；运行中换成当前一步的图标并轻轻呼吸。
+    @ViewBuilder private var icon: some View {
+        let name: String = if active {
+            runningCall.map { ProcessView.symbol($0.kind) } ?? "lightbulb"
+        } else {
+            calls.isEmpty ? "lightbulb" : "wrench.adjustable"
+        }
+        Image(systemName: name)
+            .font(.system(size: 11))
+            .frame(width: 14, height: 14)
+            .symbolEffect(.pulse, options: .repeating, isActive: active)
+            .contentTransition(.symbolEffect(.replace))
+            .accessibilityHidden(true)
+    }
+
     private var labelKey: String {
         guard active else { return "done" }
-        if liveReasoning?.isEmpty == false { return "thinking" }
-        if let call = calls.last(where: \.isRunning) { return call.id }
-        return "thinking"
+        if let call = runningCall { return call.id }
+        return "thinking-\(thinkingLine)"
+    }
+
+    /// 正在想的那一句：流式思考的最后一行非空文字。
+    private var thinkingLine: String {
+        let text = liveReasoning ?? ""
+        return text.split(whereSeparator: \.isNewline).last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
     }
 
     @ViewBuilder private var label: some View {
-        if active, let call = calls.last(where: \.isRunning), liveReasoning?.isEmpty != false {
-            Text("\(Self.verb(call.kind)) · ") + Text(call.stepText).foregroundStyle(palette.ink2)
+        if active, let call = runningCall {
+            Text(call.stepText).foregroundStyle(palette.ink2)
         } else if active {
-            Text("思考中…")
+            Text(thinkingLine.isEmpty ? "思考中…" : thinkingLine)
         } else {
             summary
         }
@@ -154,10 +180,32 @@ struct ProcessView: View {
             case .other: "调用 \(n) 个工具"
             }
         }
-        let text = Text(parts.isEmpty ? "思考过程" : parts.joined(separator: "，"))
+        var text = Text(parts.isEmpty ? "思考过程" : parts.joined(separator: "，"))
         let fails = calls.filter(\.isError).count
-        guard fails > 0 else { return text }
-        return text + Text(" · ") + Text("\(fails) 条失败").foregroundStyle(palette.bad)
+        if fails > 0 { text = text + Text(" · ") + Text("\(fails) 条失败").foregroundStyle(palette.bad) }
+        if let duration, let formatted = Self.format(duration) {
+            text = text + Text(" · \(formatted)").foregroundStyle(palette.ink4)
+        }
+        return text
+    }
+
+    static func format(_ duration: TimeInterval) -> String? {
+        let seconds = Int(duration.rounded())
+        guard seconds >= 1 else { return nil }
+        if seconds < 60 { return "\(seconds) 秒" }
+        if seconds < 3600 { return seconds % 60 == 0 ? "\(seconds / 60) 分" : "\(seconds / 60) 分 \(seconds % 60) 秒" }
+        return "\(seconds / 3600) 小时 \(seconds % 3600 / 60) 分"
+    }
+
+    static func symbol(_ kind: Transcript.ToolCall.Kind) -> String {
+        switch kind {
+        case .read: "doc.text"
+        case .edit: "pencil"
+        case .run: "apple.terminal"
+        case .search: "magnifyingglass"
+        case .web: "globe"
+        case .other: "wrench.and.screwdriver"
+        }
     }
 
     static func verb(_ kind: Transcript.ToolCall.Kind) -> String {
@@ -172,9 +220,11 @@ struct ProcessView: View {
     }
 }
 
-/// 展开后的一步：动作 + 一行描述，再点开看输出或完整的思考。
+/// 展开后的一步：图标 + 一行描述，悬停时右侧出现时间和箭头，点开看输出或完整的思考。
 private struct ProcessStepRow: View {
     let step: Transcript.Item
+    let time: Date?
+    var live = false
     @State private var open = false
     @State private var hovering = false
     @Environment(\.palette) private var palette
@@ -187,11 +237,26 @@ private struct ProcessStepRow: View {
                 pauseFollowing()
                 withAnimation(.smooth(duration: 0.22)) { open.toggle() }
             } label: {
-                HStack(spacing: 6) {
-                    Text(verb).foregroundStyle(palette.ink4).frame(width: 30, alignment: .leading)
+                HStack(spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 11))
+                        .foregroundStyle(call?.isError == true ? palette.bad : palette.ink4)
+                        .frame(width: 14, height: 14)
+                        .accessibilityHidden(true)
                     Text(line).foregroundStyle(lineColor).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 0)
-                    if running { ProgressView().controlSize(.mini).scaleEffect(0.7).frame(width: 12, height: 12) }
+                    if running || live {
+                        ProgressView().controlSize(.mini).scaleEffect(0.7).frame(width: 12, height: 12)
+                    } else {
+                        HStack(spacing: 6) {
+                            if let time { Text(time, format: .dateTime.hour().minute()).monospacedDigit() }
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 7, weight: .semibold))
+                                .rotationEffect(.degrees(open ? 90 : 0))
+                        }
+                        .foregroundStyle(palette.ink4)
+                        .opacity(hovering || open ? 1 : 0)
+                    }
                 }
                 .uiFont(12)
                 .frame(height: 24)
@@ -202,6 +267,8 @@ private struct ProcessStepRow: View {
             .buttonStyle(.plain)
             .padding(.leading, -6)
             .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.15), value: hovering)
+            .accessibilityLabel("\(verb)：\(line)")
 
             Reveal(open: open) { detail }
         }
@@ -213,9 +280,9 @@ private struct ProcessStepRow: View {
 
     private var running: Bool { call?.isRunning ?? false }
 
-    private var verb: String {
-        call.map { ProcessView.verb($0.kind) } ?? "思考"
-    }
+    private var symbol: String { call.map { ProcessView.symbol($0.kind) } ?? "lightbulb" }
+
+    private var verb: String { call.map { ProcessView.verb($0.kind) } ?? "思考" }
 
     private var line: String {
         if let call { return call.stepText }
@@ -244,7 +311,7 @@ private struct ProcessStepRow: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(palette.code, in: .rect(cornerRadius: 8))
-                .padding(.leading, 36).padding(.top, 2).padding(.bottom, 6)
+                .padding(.leading, 22).padding(.top, 2).padding(.bottom, 6)
             }
         } else if case .reasoning(_, let text) = step {
             // 思考是正文的旁白：对话字体，小一号、淡一档
@@ -255,7 +322,7 @@ private struct ProcessStepRow: View {
                 .foregroundStyle(palette.ink3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 36).padding(.top, 2).padding(.bottom, 8)
+                .padding(.leading, 22).padding(.top, 2).padding(.bottom, 8)
         }
     }
 }
@@ -269,7 +336,8 @@ struct Reveal<Content: View>: View {
     @State private var shown = false
 
     var body: some View {
-        Group {
+        // 外层始终存在（空时零高度），onChange 才一定挂得上
+        VStack(alignment: .leading, spacing: 0) {
             if mounted {
                 content
                     .frame(height: shown ? nil : 0, alignment: .top)

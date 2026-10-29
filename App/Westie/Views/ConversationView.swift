@@ -51,16 +51,21 @@ struct ConversationView: View {
                         EarlierHistoryRow(conversation: conversation, load: loadEarlier)
                     }
                     let blocks = displayBlocks
+                    let previous = Dictionary(zip(blocks.dropFirst().map(\.id), blocks.map(\.id)), uniquingKeysWith: { first, _ in first })
                     ForEach(blocks) { block in
                         switch block {
                         case .item(let item):
                             TranscriptItemView(item: item)
                         case .process(let id, let steps):
                             let trailing = id == blocks.last?.id
+                            let transcript = conversation.transcript
+                            let span = transcript.span(of: steps, after: previous[id])
                             ProcessView(
                                 steps: steps,
-                                liveReasoning: trailing ? conversation.transcript.live?.reasoning : nil,
-                                active: trailing && running && conversation.transcript.live?.text.isEmpty != false
+                                liveReasoning: trailing ? transcript.live?.reasoning : nil,
+                                active: trailing && running && transcript.live?.text.isEmpty != false,
+                                duration: span.map { $0.end.timeIntervalSince($0.start) },
+                                times: transcript.times
                             )
                         }
                     }

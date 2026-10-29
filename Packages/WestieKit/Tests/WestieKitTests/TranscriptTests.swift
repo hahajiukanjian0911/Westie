@@ -107,6 +107,14 @@ private func fixture(_ name: String) throws -> (follow: [JSONValue], workspace: 
     }
     #expect(shape == ["user", "process(1)", "reply", "process(2)", "reply"])
     #expect(Set(transcript.blocks.map(\.id)).count == transcript.blocks.count)
+
+    // 第二段过程（工具 + 思考）接在第一段正文后面，起止取自事件时间
+    let blocks = transcript.blocks
+    guard case .process(_, let steps) = blocks[3], case .item(let previous) = blocks[2] else { Issue.record("结构不对"); return }
+    let span = try #require(transcript.span(of: steps, after: previous.id))
+    #expect(span.end >= span.start)
+    guard case .tool(let call) = steps[0] else { Issue.record("第一步不是工具"); return }
+    #expect(call.finishedAt != nil)
 }
 
 @Test func classifiesTools() {
