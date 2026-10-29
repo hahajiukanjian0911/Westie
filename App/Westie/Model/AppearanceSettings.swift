@@ -197,9 +197,10 @@ final class AppearanceSettings {
 
     private static func normalizedChatWidth(_ value: Double) -> Double {
         guard value.isFinite, value >= 0 else { return 760 }
-        // 保留旧滑杆的中间宽度；拉到头（1240）及以上迁移为铺满。
+        // 拉到头（1240）及以上迁移为铺满；旧滑杆的中间宽度吸附到最近的一档，保证总有一张卡选中。
         if value == 0 || value >= 1240 { return 0 }
-        return max(560, value)
+        let widths = Typography.chatWidthOptions.map { Double($0.width) }.filter { $0 > 0 }
+        return widths.min { abs($0 - value) < abs($1 - value) } ?? 760
     }
 
     /// 浅深色落在 App 级 appearance 上（菜单、弹层一起变），不动系统设置。
