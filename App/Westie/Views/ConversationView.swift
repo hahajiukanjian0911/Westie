@@ -2,12 +2,16 @@ import SwiftUI
 import WestieKit
 
 struct ConversationView: View {
+    @Environment(\.palette) private var palette
     let model: AppModel
     let conversation: ConversationModel
     /// 跟随到底：内容变高时平滑滚到底；用户往上翻就停，翻回底部再接着跟。
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var atBottom = true
+    /// 原地等候（设计稿 2026-10-29-loading v1 方向 A）：200ms 还没到才出占位条；到了只淡入内容。
+    @State private var placeholderShown = false
+    @State private var revealed = false
 
     private var approvals: [PendingApproval] { model.approvals.filter { $0.sessionId == conversation.sessionId } }
     private var questions: [PendingQuestion] { model.questions.filter { $0.sessionId == conversation.sessionId } }
@@ -52,6 +56,7 @@ struct ConversationView: View {
                     }
                 }
                 .scrollTargetLayout()
+                .opacity(revealed ? 1 : 0)
                 .frame(maxWidth: 760, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
@@ -82,12 +87,33 @@ struct ConversationView: View {
                 // 自己发出新消息时回到跟随
                 if case .user = conversation.transcript.items.last { following = true }
             }
+            .overlay(alignment: .bottom) {
+                if conversation.isLoading, placeholderShown {
+                    LoadingPlaceholder()
+                        .frame(maxWidth: 760, alignment: .leading)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
+                        // 出现时淡入；内容到了同一帧直接移除，不和内容交叉淡变
+                        .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.18)), removal: .identity))
+                }
+            }
             .overlay {
                 if conversation.isLoading {
-                    ProgressView()
                 } else if let error = conversation.followError {
                     ContentUnavailableView("无法打开会话", systemImage: "exclamationmark.triangle", description: Text(error))
+                } else if conversation.transcript.items.isEmpty, conversation.transcript.live == nil, !running {
+                    Text("还没有消息").font(.caption).foregroundStyle(palette.ink4)
                 }
+            }
+            .task {
+                try? await Task.sleep(for: .milliseconds(200))
+                if conversation.isLoading { placeholderShown = true }
+            }
+            .onChange(of: conversation.isLoading, initial: true) { _, loading in
+                guard !loading, !revealed else { return }
+                // 占位条与内容同一帧换掉，不做两层交叉淡变；只给内容一个淡入
+                placeholderShown = false
+                withAnimation(.easeOut(duration: 0.18)) { revealed = true }
             }
 
             ComposerView(model: model, conversation: conversation, running: running)
@@ -119,5 +145,32 @@ private struct EarlierHistoryRow: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 20)
+    }
+}
+
+/// 加载占位：一条用户消息、一段回复、两行工具，贴着底部，和真实排版的节奏对得上。
+private struct LoadingPlaceholder: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            bar(width: 220, height: 28, radius: 12)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            GeometryReader { geometry in
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach([0.92, 0.84, 0.46], id: \.self) { fraction in
+                        bar(width: geometry.size.width * fraction)
+                    }
+                }
+            }
+            .frame(height: 46)
+            bar(width: 260)
+            bar(width: 210)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func bar(width: CGFloat, height: CGFloat = 10, radius: CGFloat = 5) -> some View {
+        RoundedRectangle(cornerRadius: radius).fill(palette.placeholder).frame(width: width, height: height)
     }
 }

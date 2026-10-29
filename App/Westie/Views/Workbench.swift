@@ -44,7 +44,6 @@ struct Workbench: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { layout.bounds = $0 }
         .overlay(alignment: .topLeading) { sidebarToggle }
         .overlay { DragOverlay(layout: layout, model: model) }
-        .background { FrameBackground() }
         .coordinateSpace(.named(Self.space))
         .ignoresSafeArea(.container, edges: .top)
         .onAppear(perform: watchAssist)
@@ -407,7 +406,8 @@ private struct WindowTile: View {
                 ConversationView(model: model, conversation: conversation)
                     .id(sessionId)
             } else {
-                ProgressView().controlSize(.small)
+                // 会话模型下一帧就建好，这里留空，不闪转圈
+                Color.clear
             }
         }
     }

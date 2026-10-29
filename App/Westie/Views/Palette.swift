@@ -18,6 +18,8 @@ struct Palette {
     let rowHover, rowHoverSolid, rowOn, rowOnStroke: Color
     let card, cardStroke, cardShadowNear, cardShadowFar: Color
     let bubble, code, box, boxStroke, boxShadow: Color
+    /// 加载占位条。
+    let placeholder: Color
     /// 拖放预览：半透明的卡片底和一圈强调色描边。
     let preview, previewRing: Color
     let frameBase: Color
@@ -47,6 +49,7 @@ struct Palette {
         cardStroke = dark ? .white.opacity(0.08) : ok(0.4, 0.04, h0, 0.16)
         cardShadowNear = dark ? .black.opacity(0.35) : ok(0.3, 0.05, h0, 0.06)
         cardShadowFar = dark ? .black.opacity(0.4) : ok(0.3, 0.06, h0, 0.12)
+        placeholder = dark ? .white.opacity(0.07) : ok(0.4, 0.03, h0, 0.09)
         bubble = dark ? ok(0.27, 0.02, h0, 1) : ok(0.95, 0.016, h0, 1)
         code = dark ? ok(0.17, 0.01, h0, 1) : ok(0.965, 0.008, h0, 1)
         box = dark ? ok(0.24, 0.014, h0, 1) : .white

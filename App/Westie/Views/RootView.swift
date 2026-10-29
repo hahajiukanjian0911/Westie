@@ -6,18 +6,28 @@ struct RootView: View {
     let layout: PanelLayout
     @Environment(\.colorScheme) private var colorScheme
 
+    /// 外框先行（设计稿 2026-10-29-loading v1 方向 C）：内核没就绪时只有外框和状态；
+    /// 就绪后侧栏和卡片一起升起。外框始终不动，只有 Workbench 做过渡。
+    @State private var workbenchShown = false
+    @State private var launchedAt = Date()
+
     var body: some View {
-        Group {
-            if model.phase == .ready {
+        ZStack {
+            FrameBackground()
+            if workbenchShown {
                 Workbench(layout: layout, model: model)
+                    .transition(.rise)
             } else {
                 status
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .card(palette)
-                    // 和 Workbench 一样卡片顶到窗口上沿（红绿灯落在卡片上），不单独留一条标题栏
-                    .padding(Metrics.gap)
-                    .background { FrameBackground() }
-                    .ignoresSafeArea(.container, edges: .top)
+                    .transition(.opacity.animation(.easeOut(duration: 0.2)))
+            }
+        }
+        .onChange(of: model.phase == .ready, initial: true) { _, ready in
+            // 0.4 秒内就绪就直接出现，不播
+            let animate = ready && Date().timeIntervalSince(launchedAt) > 0.4
+            withAnimation(animate ? .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32) : nil) {
+                workbenchShown = ready
             }
         }
         .overlay(alignment: .top) { errorBanner }
@@ -43,7 +53,10 @@ struct RootView: View {
     private var status: some View {
         switch model.phase {
         case .starting, .ready:
-            ProgressView("正在启动内核…")
+            Text("Westie")
+                .font(.system(size: 15, weight: .semibold))
+                .tracking(0.3)
+                .foregroundStyle(palette.ink3)
         case .waitingForDSH:
             ContentUnavailableView {
                 Label("DeepSeek Harness 正在运行", systemImage: "pause.circle")
@@ -72,5 +85,23 @@ struct RootView: View {
             .shadow(color: palette.boxShadow, radius: 8, y: 2)
             .padding(.top, 12)
         }
+    }
+}
+
+/// 卡片升起：从下方 8pt、略小一点淡入到原位。终点就是静止态，不留任何偏移。
+private struct RiseModifier: ViewModifier {
+    let progress: Double
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(progress)
+            .scaleEffect(0.985 + 0.015 * progress)
+            .offset(y: 8 * (1 - progress))
+    }
+}
+
+extension AnyTransition {
+    static var rise: AnyTransition {
+        .modifier(active: RiseModifier(progress: 0), identity: RiseModifier(progress: 1))
     }
 }
