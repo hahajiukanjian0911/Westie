@@ -50,7 +50,9 @@ open --env WESTIE_MOCK_LLM=3190 temp/DerivedData/Build/Products/Debug/Westie.app
 ## 测试
 
 ```sh
-cd Packages/WestieKit && WESTIE_KERNEL_IT=1 swift test    # 含真实内核集成测试（只调只读方法）
+(cd Packages/WestieKit && swift test)                   # 模型与思考切句单测
+scripts/test-conversation-scroll.sh                    # 离屏 AppKit 滚动回归，不创建窗口
+(cd Packages/WestieKit && WESTIE_KERNEL_IT=1 swift test) # 含真实内核集成测试（只调只读方法）
 ```
 
 DEBUG 构建支持 `WESTIE_AUTOMATION` 后台驱动 App（步骤见 `App/Westie/Automation.swift`），只调用 App 自己的方法、截自己窗口，不合成输入、不前置窗口。不在假模型模式时只允许只读步骤（`select`、`earlier`、`shot`、`dump`、`wait`、`quit`）。`select:` 可写序号或会话 id；序号按侧栏可见列表算（空会话不计），可复现的脚本优先用 id。`earlier[:页数]` 往前翻页，省略页数翻到会话开头：

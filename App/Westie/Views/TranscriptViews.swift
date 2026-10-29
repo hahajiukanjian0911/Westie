@@ -62,8 +62,7 @@ struct ProcessView: View {
     @State private var hovering = false
     /// 运行中那一行正显示的思考：只放写完的整句，每句至少停留 thoughtDwell。
     @State private var shownThought = ""
-    @State private var shownThoughtAt = Date.distantPast
-    @State private var thoughtUpdate: Task<Void, Never>?
+    @State private var shownThoughtAt: ContinuousClock.Instant?
     @Environment(\.palette) private var palette
     @Environment(\.pauseFollowing) private var pauseFollowing
 
@@ -113,8 +112,7 @@ struct ProcessView: View {
             .onHover { hovering = $0 }
             .animation(.smooth(duration: 0.25), value: labelKey)
             .animation(.easeOut(duration: 0.15), value: hovering)
-            .onChange(of: latestThought, initial: true) { _, sentence in showThought(sentence) }
-            .onDisappear { thoughtUpdate?.cancel() }
+            .task(id: latestThought) { await showThought(latestThought) }
             .accessibilityValue(expanded ? "已展开" : "已收起")
 
             Reveal(open: expanded) {
@@ -137,8 +135,8 @@ struct ProcessView: View {
             pauseFollowing(expanded)
             withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { old, new in
-            trace("process \(steps.first?.id ?? "") minY \(old) -> \(new)")
+        .onGeometryChange(for: ProcessRowTrace.self) { ProcessRowTrace(id: steps.first?.id ?? "", y: $0.frame(in: .global).minY) } action: { old, new in
+            trace("process \(new.id) minY \(old.y) -> \(new.y)")
         }
         #endif
     }
@@ -166,43 +164,23 @@ struct ProcessView: View {
 
     /// 流式思考里最近一句写完的话；正在流出的半句不算。
     private var latestThought: String {
-        Self.lastCompleteSentence(liveReasoning ?? "") ?? ""
+        ThoughtSentence.lastComplete(in: liveReasoning ?? "") ?? ""
     }
 
-    /// 换句：距上次换句不足 thoughtDwell 就等到期，到期时直接取那时最新的一句，中间的略过。
-    private func showThought(_ sentence: String) {
-        thoughtUpdate?.cancel()
+    /// task 随句子和视图生命周期取消；到期前的新句会替换旧任务，中间的略过。
+    private func showThought(_ sentence: String) async {
         guard sentence != shownThought else { return }
-        let wait = Self.thoughtDwell - Date().timeIntervalSince(shownThoughtAt)
-        thoughtUpdate = Task { @MainActor in
-            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
-            guard !Task.isCancelled else { return }
-            shownThought = sentence
-            shownThoughtAt = Date()
+        if let shownThoughtAt {
+            let deadline = shownThoughtAt.advanced(by: .seconds(Self.thoughtDwell))
+            do { try await ContinuousClock().sleep(until: deadline) }
+            catch { return }
         }
-    }
-
-    /// 按中英文句末标点和换行断句，返回最后一句完整的话。英文句点后面要跟空白才算句末，免得把 a.swift、3.5 拆开。
-    static func lastCompleteSentence(_ text: String) -> String? {
-        var last: String?
-        var start = text.startIndex
-        var index = text.startIndex
-        while index < text.endIndex {
-            let char = text[index]
-            let next = text.index(after: index)
-            let ends: Bool = switch char {
-            case "。", "！", "？", "!", "?", "\n": true
-            case ".": next < text.endIndex && text[next].isWhitespace
-            default: false
-            }
-            if ends {
-                let sentence = text[start..<next].trimmingCharacters(in: .whitespacesAndNewlines)
-                if sentence.count > 1 { last = sentence }
-                start = next
-            }
-            index = next
-        }
-        return last
+        guard !Task.isCancelled else { return }
+        shownThought = sentence
+        shownThoughtAt = .now
+        #if DEBUG
+        trace("thought shown chars=\(sentence.count)")
+        #endif
     }
 
     @ViewBuilder private var label: some View {
@@ -330,6 +308,9 @@ private struct ProcessStepRow: View {
             pauseFollowing(open)
             withAnimation(.smooth(duration: 0.22)) { open.toggle() }
         }
+        .onGeometryChange(for: ProcessRowTrace.self) { ProcessRowTrace(id: step.id, y: $0.frame(in: .global).minY) } action: { old, new in
+            trace("step \(new.id) minY \(old.y) -> \(new.y)")
+        }
         #endif
     }
 
@@ -449,5 +430,12 @@ func trace(_ line: @autoclosure () -> String) {
     } else {
         FileManager.default.createFile(atPath: path, contents: data)
     }
+}
+#endif
+
+#if DEBUG
+private struct ProcessRowTrace: Equatable {
+    var id: String
+    var y: CGFloat
 }
 #endif
