@@ -238,12 +238,13 @@ final class AppModel {
         }
     }
 
-    /// 某个工作区下要显示的会话（排除已归档与子 Agent 会话），按最近活动排序。
+    /// 某个工作区下要显示的会话（排除已归档、子 Agent 会话和没发过消息的空会话），按最近活动排序。
+    /// 空会话只在正选中时显示，发出第一条消息后就是正常会话。
     func sessions(in workspace: Workspace) -> [SessionSummary] {
         workspace.sessionIds
             .filter { !board.archivedSessionIds.contains($0) }
             .compactMap { sessions[$0] }
-            .filter { $0.parentSessionId == nil }
+            .filter { $0.parentSessionId == nil && (!$0.blank || $0.id == selectedSessionId) }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
