@@ -18,6 +18,7 @@ final class ConversationModel {
     var modelOverride: (choice: ModelChoice, effort: String?)?
 
     private var followTask: Task<Void, Never>?
+    private var earlierTask: Task<Bool, Never>?
     private var connection: KernelConnection?
     /// 跟读开场快照的日志截点；往前翻页都以它为 throughSeq，保证各页拼起来连续。
     private var historyCursor: Int?
@@ -55,26 +56,39 @@ final class ConversationModel {
     }
 
     /// 往前加载一页历史（与 DSH 网页版同样的分页参数：至少 50 条消息、跨过 2 个回合，最多 500 条）。
-    func loadEarlier() async {
-        guard hasEarlierHistory, !isLoadingEarlier, let connection, let historyCursor,
-              let beforeSeq = transcript.firstSeq else { return }
+    /// 已有请求在途时等它结束并返回它的结果，不另发请求。返回是否真的接上了更早的记录。
+    @discardableResult
+    func loadEarlier() async -> Bool {
+        if let earlierTask { return await earlierTask.value }
+        guard hasEarlierHistory, let connection, let historyCursor,
+              let beforeSeq = transcript.firstSeq else { return false }
         isLoadingEarlier = true
         earlierError = nil
-        defer { isLoadingEarlier = false }
+        let task = Task { await fetchEarlier(connection: connection, throughSeq: historyCursor, beforeSeq: beforeSeq) }
+        earlierTask = task
+        let loaded = await task.value
+        earlierTask = nil
+        isLoadingEarlier = false
+        return loaded
+    }
+
+    private func fetchEarlier(connection: KernelConnection, throughSeq: Int, beforeSeq: Int) async -> Bool {
         do {
             let page = try await connection.call("session/page", ["request": [
                 "address": ["kind": "session", "sessionId": .string(sessionId)],
-                "throughSeq": .number(Double(historyCursor)),
+                "throughSeq": .number(Double(throughSeq)),
                 "beforeSeq": .number(Double(beforeSeq)),
                 "maxMessages": .number(500),
                 "turnWindow": ["minMessages": .number(50), "minTurns": .number(2)],
             ]])
-            let records = page["records"]?.arrayValue ?? []
-            transcript.prepend(pageRecords: records)
+            transcript.prepend(pageRecords: page["records"]?.arrayValue ?? [])
+            let loaded = (transcript.firstSeq ?? beforeSeq) < beforeSeq
             // 没拿到更早的记录却仍说还有，也停下，免得反复空翻。
-            hasEarlierHistory = (page["hasMore"]?.boolValue ?? false) && transcript.firstSeq ?? 0 < beforeSeq
+            hasEarlierHistory = (page["hasMore"]?.boolValue ?? false) && loaded
+            return loaded
         } catch {
             earlierError = (error as? RemoteFailure)?.message ?? String(describing: error)
+            return false
         }
     }
 

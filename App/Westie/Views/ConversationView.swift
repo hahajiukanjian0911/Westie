@@ -23,9 +23,8 @@ struct ConversationView: View {
     private func loadEarlier() {
         let anchor = conversation.transcript.items.first?.id
         Task {
-            await conversation.loadEarlier()
-            // 还在跟随到底（刚打开、内容不满一屏）就留在底部；只有往上翻着读时才钉住原位置。
-            if let anchor, !following { scrollPosition.scrollTo(id: anchor, anchor: .top) }
+            // 还在跟随到底（刚打开、内容不满一屏）就留在底部；只有往上翻着读、且真的接上了记录时才钉住原位置。
+            if await conversation.loadEarlier(), let anchor, !following { scrollPosition.scrollTo(id: anchor, anchor: .top) }
         }
     }
 
@@ -83,8 +82,8 @@ struct ConversationView: View {
                 guard following, new > old else { return }
                 withAnimation(.easeOut(duration: 0.3)) { scrollPosition.scrollTo(edge: .bottom) }
             }
-            .onChange(of: conversation.transcript.items.count) {
-                // 自己发出新消息时回到跟随
+            .onChange(of: conversation.transcript.items.last?.id) {
+                // 自己发出新消息时回到跟随。看末条换没换，不看条数：往前翻页只在前面加，末条不变
                 if case .user = conversation.transcript.items.last { following = true }
             }
             .overlay(alignment: .bottom) {

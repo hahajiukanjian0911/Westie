@@ -111,10 +111,13 @@ enum Automation {
                 // 往前翻页 n 次（默认翻到底），只读。
                 guard let conversation = model.conversation else { note("FAIL 没有打开的会话"); continue }
                 var pages = 0
+                // 只数真正接上了记录的页；没有进展（出错或已到头）就停，不空转
                 while conversation.hasEarlierHistory, pages < (Int(argument) ?? .max) {
-                    await conversation.loadEarlier()
+                    guard await conversation.loadEarlier() else {
+                        if let error = conversation.earlierError { note("FAIL earlier \(error)") }
+                        break
+                    }
                     pages += 1
-                    if let error = conversation.earlierError { note("FAIL earlier \(error)"); break }
                 }
                 note("earlier pages=\(pages) firstSeq=\(conversation.transcript.firstSeq ?? -1) hasMore=\(conversation.hasEarlierHistory)")
             case "workspace":

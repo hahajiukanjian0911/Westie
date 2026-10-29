@@ -5,6 +5,7 @@ struct RootView: View {
     @Bindable var model: AppModel
     let layout: PanelLayout
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 外框先行（设计稿 2026-10-29-loading v1 方向 C）：内核没就绪时只有外框和状态；
     /// 就绪后侧栏和卡片一起升起。外框始终不动，只有 Workbench 做过渡。
@@ -16,7 +17,8 @@ struct RootView: View {
             FrameBackground()
             if workbenchShown {
                 Workbench(layout: layout, model: model)
-                    .transition(.rise)
+                    // 减少动态效果时只淡入，不位移不缩放
+                    .transition(reduceMotion ? .opacity : .rise)
             } else {
                 status
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -26,7 +28,8 @@ struct RootView: View {
         .onChange(of: model.phase == .ready, initial: true) { _, ready in
             // 0.4 秒内就绪就直接出现，不播
             let animate = ready && Date().timeIntervalSince(launchedAt) > 0.4
-            withAnimation(animate ? .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32) : nil) {
+            let curve: Animation = reduceMotion ? .easeOut(duration: 0.2) : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32)
+            withAnimation(animate ? curve : nil) {
                 workbenchShown = ready
             }
         }

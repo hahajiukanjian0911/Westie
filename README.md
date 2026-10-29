@@ -12,7 +12,7 @@ DeepSeek Harness（DSH）的原生 macOS 客户端：沿用 DSH 内核，界面�
 | `Packages/Textual` | Textual 0.5.0 的副本，打了流式出字所需的小补丁（见 `PATCHES.md`） |
 | `scripts/` | 开发工具：`kernel.sh` 单独起内核、`probe.mjs` 链路探针、`mock-llm.mjs` 假模型、`dump-remote.mjs` 导出接口描述符 |
 
-界面由五个平级的面板组成：顶部、主边栏、对话、侧边栏、底部（`PanelLayout`、`Workbench`）。面板只管位置、尺寸和收起；内容是窗口，一个面板里的窗口可以并排显示或收着，窗口能拖到别的面板。布局保存在 UserDefaults，不写 `~/.dsh`。
+界面由五个平级的面板组成：顶部、主边栏、对话、侧边栏、底部（`PanelLayout`、`Workbench`）。面板只管位置、尺寸和收起；内容是窗口，一个面板里的窗口可以并排显示或收着，窗口能拖到别的面板。布局保存在 UserDefaults，不写 `~/.dsh`；按数据目录分开保存（真实 `~/.dsh` 沿用 `Westie.panelLayout.v1`，其他目录在键后加路径），不会把一份数据里的会话窗口恢复到另一份里。
 
 拖放规则（设计稿 `deliverables/Westie/reviews/2026-10-28-panels/v3`）：拖动时布局不动，只有一张小卡跟着指针，落点浮出松手后的样子。外框最外一圈（24pt，停 150ms）打开那条边上没显示的面板；窗口卡片的前三成或后三成表示并排插在它前面或后面，正中间表示叠进去；指针到对话面板上沿会浮出五格布局条。标题栏的布局按钮弹出同一张五格图，不拖也能移。窗口移走后，如果原面板空了、还有收着的窗口，就原地列出它们供补位。对话面板里的窗口全收着时也一直这样列出。指针靠近窗口顶部正中会浮出一根拖动条，拖它或标题栏空白处移动窗口，拖动中按 Esc 取消。系统自动拖动 App 已关掉，只有外框露出的地方能拖 App（双击按系统设置缩放）。
 
@@ -49,7 +49,7 @@ open --env WESTIE_MOCK_LLM=3190 temp/DerivedData/Build/Products/Debug/Westie.app
 cd Packages/WestieKit && WESTIE_KERNEL_IT=1 swift test    # 含真实内核集成测试（只调只读方法）
 ```
 
-DEBUG 构建支持 `WESTIE_AUTOMATION` 后台驱动 App（步骤见 `App/Westie/Automation.swift`），只调用 App 自己的方法、截自己窗口，不合成输入、不前置窗口。不在假模型模式时只允许只读步骤（`select`、`shot`、`dump`、`wait`、`quit`）：
+DEBUG 构建支持 `WESTIE_AUTOMATION` 后台驱动 App（步骤见 `App/Westie/Automation.swift`），只调用 App 自己的方法、截自己窗口，不合成输入、不前置窗口。不在假模型模式时只允许只读步骤（`select`、`earlier`、`shot`、`dump`、`wait`、`quit`）。`select:` 可写序号或会话 id；序号按侧栏可见列表算（空会话不计），可复现的脚本优先用 id。`earlier[:页数]` 往前翻页，省略页数翻到会话开头：
 
 ```sh
 open -g -j -n --env WESTIE_MOCK_LLM=3190 \
