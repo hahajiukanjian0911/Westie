@@ -49,15 +49,50 @@ final class AppearanceSettings {
     var uiCJK: String { didSet { save() } }
     var chatLatin: String { didSet { save() } }
     var chatCJK: String { didSet { save() } }
-    var chatSize: Double { didSet { save() } }
+    var chatSize: Double {
+        didSet {
+            let valid = Self.clamp(chatSize, to: Typography.chatSizes, fallback: 14)
+            if chatSize != valid { chatSize = valid } else { save() }
+        }
+    }
     var codeFont: String { didSet { save() } }
-    var codeSize: Double { didSet { save() } }
-    var lineHeight: Double { didSet { save() } }
-    var paragraphSpacing: Double { didSet { save() } }
-    var tracking: Double { didSet { save() } }
-    var codeLineHeight: Double { didSet { save() } }
+    var codeSize: Double {
+        didSet {
+            let valid = Self.clamp(codeSize, to: Typography.codeSizes, fallback: 12.5)
+            if codeSize != valid { codeSize = valid } else { save() }
+        }
+    }
+    var lineHeight: Double {
+        didSet {
+            let valid = Self.clamp(lineHeight, to: Typography.lineHeights, fallback: 1.7)
+            if lineHeight != valid { lineHeight = valid } else { save() }
+        }
+    }
+    var paragraphSpacing: Double {
+        didSet {
+            let valid = Self.clamp(paragraphSpacing, to: Typography.paragraphSpacings, fallback: 12)
+            if paragraphSpacing != valid { paragraphSpacing = valid } else { save() }
+        }
+    }
+    var tracking: Double {
+        didSet {
+            let valid = Self.clamp(tracking, to: Typography.trackings, fallback: 0)
+            if tracking != valid { tracking = valid } else { save() }
+        }
+    }
+    var codeLineHeight: Double {
+        didSet {
+            let valid = Self.clamp(codeLineHeight, to: Typography.codeLineHeights, fallback: 1.55)
+            if codeLineHeight != valid { codeLineHeight = valid } else { save() }
+        }
+    }
     /// 对话栏宽度（不属于搭配，换搭配时不变）。
-    var chatWidth: Double { didSet { save() } }
+    var chatWidth: Double {
+        didSet {
+            let valid = Self.normalizedChatWidth(chatWidth)
+            if chatWidth != valid { chatWidth = valid } else { save() }
+        }
+    }
 
     /// 一组搭配：一点即换全部字体、字号和行距（设计稿 v4 的 B）。
     struct FontPreset: Identifiable {
@@ -99,7 +134,7 @@ final class AppearanceSettings {
     /// 只拖一根字号滑杆时，代码字号跟着走：对话字号的 0.9 倍，取到半号。
     func setChatSizeKeepingRatio(_ size: Double) {
         chatSize = size
-        codeSize = (size * 0.9 * 2).rounded() / 2
+        codeSize = (chatSize * 0.9 * 2).rounded() / 2
     }
 
     var typography: Typography {
@@ -143,16 +178,28 @@ final class AppearanceSettings {
         uiCJK = fonts["uiCJK"] as? String ?? FontOption.uiCJK[0].name
         chatLatin = fonts["chatLatin"] as? String ?? FontOption.chatLatin[0].name
         chatCJK = fonts["chatCJK"] as? String ?? FontOption.chatCJK[0].name
-        chatSize = fonts["chatSize"] as? Double ?? 14
+        chatSize = Self.clamp(fonts["chatSize"] as? Double ?? 14, to: Typography.chatSizes, fallback: 14)
         codeFont = fonts["code"] as? String ?? FontOption.code[0].name
-        codeSize = fonts["codeSize"] as? Double ?? 12.5
-        lineHeight = fonts["lineHeight"] as? Double ?? 1.7
-        paragraphSpacing = fonts["paragraphSpacing"] as? Double ?? 12
-        tracking = fonts["tracking"] as? Double ?? 0
-        codeLineHeight = fonts["codeLineHeight"] as? Double ?? 1.55
-        chatWidth = fonts["chatWidth"] as? Double ?? 760
-        // 早先的滑杆版本拉到头（1240）表示铺满
-        if chatWidth >= 1240 { chatWidth = 0 }
+        codeSize = Self.clamp(fonts["codeSize"] as? Double ?? 12.5, to: Typography.codeSizes, fallback: 12.5)
+        lineHeight = Self.clamp(fonts["lineHeight"] as? Double ?? 1.7, to: Typography.lineHeights, fallback: 1.7)
+        paragraphSpacing = Self.clamp(fonts["paragraphSpacing"] as? Double ?? 12, to: Typography.paragraphSpacings, fallback: 12)
+        tracking = Self.clamp(fonts["tracking"] as? Double ?? 0, to: Typography.trackings, fallback: 0)
+        codeLineHeight = Self.clamp(fonts["codeLineHeight"] as? Double ?? 1.55, to: Typography.codeLineHeights, fallback: 1.55)
+        chatWidth = Self.normalizedChatWidth(fonts["chatWidth"] as? Double ?? 760)
+        // 将迁移与修复后的数值写回，避免下一次启动重新读到旧值。
+        save()
+    }
+
+    private static func clamp(_ value: Double, to range: ClosedRange<CGFloat>, fallback: Double) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    private static func normalizedChatWidth(_ value: Double) -> Double {
+        guard value.isFinite, value >= 0 else { return 760 }
+        // 保留旧滑杆的中间宽度；拉到头（1240）及以上迁移为铺满。
+        if value == 0 || value >= 1240 { return 0 }
+        return max(560, value)
     }
 
     /// 浅深色落在 App 级 appearance 上（菜单、弹层一起变），不动系统设置。

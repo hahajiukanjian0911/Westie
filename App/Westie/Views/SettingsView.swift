@@ -411,7 +411,7 @@ private struct FontSettings: View {
             SettingsGroup {
                 FontPreview(typography: appearance.typography)
                 SettingsRow(label: "字号") {
-                    ValueSlider(value: appearance.chatSize, range: Typography.chatSizes, step: 1, letters: true) {
+                    ValueSlider(label: "对话字号", value: appearance.chatSize, range: Typography.chatSizes, step: 1, letters: true) {
                         appearance.setChatSizeKeepingRatio($0)
                     }
                 }
@@ -462,25 +462,25 @@ private struct FontSettings: View {
             FontMenuButton(options: FontOption.chatCJK, selected: appearance.chatCJK, others: { InstalledFonts.cjk }) { appearance.chatCJK = $0 }
         }
         SettingsRow(label: "字号", secondary: true) {
-            ValueSlider(value: appearance.chatSize, range: Typography.chatSizes, step: 1, letters: true) { appearance.chatSize = $0 }
+            ValueSlider(label: "对话字号", value: appearance.chatSize, range: Typography.chatSizes, step: 1, letters: true) { appearance.chatSize = $0 }
         }
         SettingsRow(label: "行高", secondary: true) {
-            ValueSlider(value: appearance.lineHeight, range: Typography.lineHeights, step: 0.05, format: { String(format: "%.2f", $0) }) { appearance.lineHeight = $0 }
+            ValueSlider(label: "对话行高", value: appearance.lineHeight, range: Typography.lineHeights, step: 0.05, format: { String(format: "%.2f", $0) }) { appearance.lineHeight = $0 }
         }
         SettingsRow(label: "段距", secondary: true) {
-            ValueSlider(value: appearance.paragraphSpacing, range: Typography.paragraphSpacings, step: 1, format: { "\(Int($0)) pt" }) { appearance.paragraphSpacing = $0 }
+            ValueSlider(label: "段距", value: appearance.paragraphSpacing, range: Typography.paragraphSpacings, step: 1, format: { "\(Int($0)) pt" }) { appearance.paragraphSpacing = $0 }
         }
         SettingsRow(label: "字距", secondary: true) {
-            ValueSlider(value: appearance.tracking, range: Typography.trackings, step: 0.01, format: { ($0 > 0 ? "+" : "") + String(format: "%.2f", $0) }) { appearance.tracking = $0 }
+            ValueSlider(label: "字距", value: appearance.tracking, range: Typography.trackings, step: 0.01, format: { ($0 > 0 ? "+" : "") + String(format: "%.2f", $0) }) { appearance.tracking = $0 }
         }
         SettingsRow(label: "代码") {
-            FontMenuButton(options: FontOption.code, selected: appearance.codeFont, mono: true, others: { InstalledFonts.monospaced }) { appearance.codeFont = $0 }
+            FontMenuButton(options: FontOption.code, selected: appearance.codeFont, others: { InstalledFonts.monospaced }) { appearance.codeFont = $0 }
         }
         SettingsRow(label: "字号", secondary: true) {
-            ValueSlider(value: appearance.codeSize, range: Typography.codeSizes, step: 0.5, letters: true) { appearance.codeSize = $0 }
+            ValueSlider(label: "代码字号", value: appearance.codeSize, range: Typography.codeSizes, step: 0.5, letters: true) { appearance.codeSize = $0 }
         }
         SettingsRow(label: "行高", secondary: true) {
-            ValueSlider(value: appearance.codeLineHeight, range: Typography.codeLineHeights, step: 0.05, format: { String(format: "%.2f", $0) }) { appearance.codeLineHeight = $0 }
+            ValueSlider(label: "代码行高", value: appearance.codeLineHeight, range: Typography.codeLineHeights, step: 0.05, format: { String(format: "%.2f", $0) }) { appearance.codeLineHeight = $0 }
         }
     }
 }
@@ -534,6 +534,10 @@ private struct WidthCard: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: selected)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("对话宽度，\(name)")
+        .accessibilityValue(width > 0 ? "\(Int(width)) 点" : "铺满窗口")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var bar: some View { RoundedRectangle(cornerRadius: 2).frame(height: 4) }
@@ -569,6 +573,9 @@ private struct PresetCard: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: selected)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("字体搭配，\(preset.name)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -619,6 +626,7 @@ private struct FontPreview: View {
 
 /// 数值滑杆：值写在右边；拖动时按步长取整，只在值真的变了才写回。
 private struct ValueSlider: View {
+    let label: String
     let value: Double
     let range: ClosedRange<CGFloat>
     let step: Double
@@ -635,6 +643,8 @@ private struct ValueSlider: View {
                 if rounded != value { set(rounded) }
             }), in: Double(range.lowerBound)...Double(range.upperBound))
             .frame(width: letters ? 150 : 160)
+            .accessibilityLabel(label)
+            .accessibilityValue(format(value))
             if letters { Text("A").uiFont(16).foregroundStyle(palette.ink3).fixedSize() }
             Text(format(value)).monospacedDigit().foregroundStyle(palette.ink)
                 .frame(minWidth: 40, alignment: .trailing)
@@ -647,7 +657,6 @@ private struct ValueSlider: View {
 private struct FontMenuButton: View {
     let options: [FontOption]
     let selected: String
-    var mono = false
     let others: () -> [String]
     let pick: (String) -> Void
     @Environment(\.palette) private var palette
@@ -679,7 +688,7 @@ private struct FontMenuButton: View {
     private var menu: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(options.sorted { $0.installed && !$1.installed }) { option in
-                FontItem(option: option, selected: option.name == selected, mono: mono) {
+                FontItem(option: option, selected: option.name == selected) {
                     if option.installed {
                         pick(option.name)
                         open = false
@@ -719,7 +728,6 @@ private struct FontMenuButton: View {
 private struct FontItem: View {
     let option: FontOption
     let selected: Bool
-    let mono: Bool
     let action: () -> Void
     @Environment(\.palette) private var palette
     @State private var hovering = false
@@ -747,6 +755,7 @@ private struct FontItem: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .help(installed ? "" : "点一下复制 brew install --cask \(option.cask ?? "")")
     }
 }

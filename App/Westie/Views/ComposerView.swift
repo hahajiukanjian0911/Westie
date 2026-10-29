@@ -134,6 +134,8 @@ struct ModelPicker: View {
                     Text("思考：\(efforts[min(Int(effortIndex), efforts.count - 1)])")
                         .uiFont(12)
                     Slider(value: $effortIndex, in: 0...Double(efforts.count - 1), step: 1)
+                        .accessibilityLabel("思考档位")
+                        .accessibilityValue(efforts[min(Int(effortIndex), efforts.count - 1)])
                 }
             }
         }
@@ -178,6 +180,9 @@ private struct ModelRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

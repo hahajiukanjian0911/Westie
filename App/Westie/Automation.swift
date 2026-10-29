@@ -10,7 +10,7 @@ import WestieKit
 /// 步骤：`workspace:<路径>` `new` `prompt:<文本>` `wait:<秒>` `idle`（等回合结束）
 ///      `approve` `reject` `answer:<选项>` `select:<序号或会话 id>` `earlier[:<页数>]`（往前翻页） `shot:<png 路径>` `dump` `quit`
 ///      面板：`split:<序号>`（并排打开第 n 个会话） `move:<面板>`（聚焦窗口移到 top/primary/center/secondary/bottom）
-///      `toggle:<面板>` `hide` `appearance:dark|light`（收起聚焦窗口） `layout`（记录各面板的窗口）
+///      `toggle:<面板>` `hide`（收起聚焦窗口） `appearance:dark|light`（只改 App 外观） `layout`（记录各面板的窗口）
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
 ///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图）
@@ -208,7 +208,11 @@ enum Automation {
                 case "tracking": appearance.tracking = Double(parts[1]) ?? appearance.tracking
                 case "chatWidth": appearance.chatWidth = Double(parts[1]) ?? appearance.chatWidth
                 case "codeLineHeight": appearance.codeLineHeight = Double(parts[1]) ?? appearance.codeLineHeight
-                case "preset": appearance.apply(AppearanceSettings.fontPresets[min(Int(parts[1]) ?? 0, AppearanceSettings.fontPresets.count - 1)])
+                case "preset":
+                    guard let index = Int(parts[1]), AppearanceSettings.fontPresets.indices.contains(index) else {
+                        note("FAIL preset 序号越界：\(parts[1])"); continue
+                    }
+                    appearance.apply(AppearanceSettings.fontPresets[index])
                 case "expand": model.settings.fontsExpanded = parts[1] == "true"
                 default: note("FAIL 未知字体项 \(parts[0])")
                 }

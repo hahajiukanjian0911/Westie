@@ -71,9 +71,9 @@ struct FontOption: Identifiable, Hashable, Sendable {
     ]
 
     /// 按名字找推荐字体；不在推荐里但本机装了（从「其他字体…」选的），就按字体族名直接用。
-    static func find(_ name: String?, in list: [FontOption]) -> FontOption {
+    @MainActor static func find(_ name: String?, in list: [FontOption]) -> FontOption {
         if let match = list.first(where: { $0.name == name }) { return match }
-        if let name, NSFontManager.shared.availableFontFamilies.contains(name) {
+        if let name, FontOption.installedFamilies.contains(name) {
             return FontOption(name: name, family: name, design: list[0].design)
         }
         return list[0]
@@ -154,6 +154,23 @@ struct Typography: Equatable, Sendable {
     /// 西文字体打底，中文字体放进 cascade list；字体没装时退回同类系统字体。
     static func make(_ latin: FontOption, cjk: FontOption?, size: CGFloat, weight: Font.Weight) -> NSFont {
         let nsWeight = weight.nsWeight
+        // 原生 SF Pro / 苹方无需描述符解析，直接沿用 AppKit 的系统字体缓存。
+        if nativePair(latin, cjk) { return systemFont(latin.design, size: size, weight: nsWeight) }
+        let key = FontCacheKey(latin: latin, cjk: cjk, size: size, weight: nsWeight.rawValue)
+        if let font = fontCache.object(forKey: key) { return font }
+        let font = resolve(latin, cjk: cjk, size: size, weight: nsWeight)
+        fontCache.setObject(font, forKey: key)
+        return font
+    }
+
+    /// NSCache 支持并发访问，限制数量以免拖字号滑杆时无限累积。
+    nonisolated(unsafe) private static let fontCache: NSCache<FontCacheKey, NSFont> = {
+        let cache = NSCache<FontCacheKey, NSFont>()
+        cache.countLimit = 256
+        return cache
+    }()
+
+    private static func resolve(_ latin: FontOption, cjk: FontOption?, size: CGFloat, weight nsWeight: NSFont.Weight) -> NSFont {
         var base: NSFont
         if let family = latin.family,
            let font = NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: family, .traits: [NSFontDescriptor.TraitKey.weight: nsWeight]]), size: size),
@@ -173,6 +190,29 @@ struct Typography: Equatable, Sendable {
         let fallback = NSFontDescriptor(fontAttributes: [.family: family, .traits: [NSFontDescriptor.TraitKey.weight: nsWeight]])
         let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: [fallback]])
         return NSFont(descriptor: descriptor, size: size) ?? base
+    }
+}
+
+/// 完整字体输入作为缓存键，切换中文后备、字号或字重均不会误用旧结果。
+private final class FontCacheKey: NSObject {
+    let latin: FontOption
+    let cjk: FontOption?
+    let size: CGFloat
+    let weight: CGFloat
+
+    init(latin: FontOption, cjk: FontOption?, size: CGFloat, weight: CGFloat) {
+        self.latin = latin; self.cjk = cjk; self.size = size; self.weight = weight
+    }
+
+    override var hash: Int {
+        var hasher = Hasher()
+        hasher.combine(latin); hasher.combine(cjk); hasher.combine(size); hasher.combine(weight)
+        return hasher.finalize()
+    }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? FontCacheKey else { return false }
+        return latin == other.latin && cjk == other.cjk && size == other.size && weight == other.weight
     }
 }
 
