@@ -57,6 +57,7 @@ struct ProcessView: View {
     #endif
     @State private var hovering = false
     @Environment(\.palette) private var palette
+    @Environment(\.pauseFollowing) private var pauseFollowing
 
     private var calls: [Transcript.ToolCall] {
         steps.compactMap { if case .tool(let call) = $0 { call } else { nil } }
@@ -65,6 +66,8 @@ struct ProcessView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                // 亲手展开时不跟随到底：点的这一行留在原位，内容往下长
+                pauseFollowing()
                 withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
@@ -99,7 +102,7 @@ struct ProcessView: View {
             .animation(.smooth(duration: 0.22), value: labelKey)
             .accessibilityValue(expanded ? "已展开" : "已收起")
 
-            if expanded {
+            Reveal(open: expanded) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(steps) { step in ProcessStepRow(step: step) }
                     if let liveReasoning, !liveReasoning.isEmpty {
@@ -109,10 +112,15 @@ struct ProcessView: View {
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) { Rectangle().fill(palette.cardStroke).frame(width: 1) }
                 .padding(.leading, 4).padding(.top, 4).padding(.bottom, 2)
-                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: .westieToggleProcess)) { _ in
+            pauseFollowing()
+            withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
+        }
+        #endif
     }
 
     /// 运行中显示当前一步；结束后显示按类计数的摘要。
@@ -171,11 +179,13 @@ private struct ProcessStepRow: View {
     @State private var hovering = false
     @Environment(\.palette) private var palette
     @Environment(\.typography) private var typography
+    @Environment(\.pauseFollowing) private var pauseFollowing
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.smooth(duration: 0.2)) { open.toggle() }
+                pauseFollowing()
+                withAnimation(.smooth(duration: 0.22)) { open.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Text(verb).foregroundStyle(palette.ink4).frame(width: 30, alignment: .leading)
@@ -193,7 +203,7 @@ private struct ProcessStepRow: View {
             .padding(.leading, -6)
             .onHover { hovering = $0 }
 
-            if open { detail.transition(.opacity) }
+            Reveal(open: open) { detail }
         }
     }
 
@@ -249,3 +259,54 @@ private struct ProcessStepRow: View {
         }
     }
 }
+
+/// 展开收起：高度从 0 长到自然高度、往下推开后面的内容，不叠在别的内容上。
+/// 内容第一次打开前不挂载；挂上后先排一帧拿到高度，再在同一个动画事务里展开，下方内容一起平滑让位。
+struct Reveal<Content: View>: View {
+    let open: Bool
+    @ViewBuilder let content: Content
+    @State private var mounted = false
+    @State private var shown = false
+
+    var body: some View {
+        Group {
+            if mounted {
+                content
+                    .frame(height: shown ? nil : 0, alignment: .top)
+                    .clipped()
+                    .opacity(shown ? 1 : 0)
+                    .allowsHitTesting(shown)
+                    .accessibilityHidden(!shown)
+            }
+        }
+        .onChange(of: open, initial: true) { _, open in
+            guard open != shown else { return }
+            let transaction = Transaction(animation: .smooth(duration: 0.22))
+            if open, !mounted {
+                mounted = true
+                DispatchQueue.main.async { withTransaction(transaction) { shown = true } }
+            } else {
+                withTransaction(transaction) { shown = open }
+            }
+        }
+    }
+}
+
+private struct PauseFollowingKey: EnvironmentKey {
+    static let defaultValue: @MainActor @Sendable () -> Void = {}
+}
+
+extension EnvironmentValues {
+    /// 用户亲手展开或收起时调用：这次变高不跟随滚到底。
+    var pauseFollowing: @MainActor @Sendable () -> Void {
+        get { self[PauseFollowingKey.self] }
+        set { self[PauseFollowingKey.self] = newValue }
+    }
+}
+
+#if DEBUG
+extension Notification.Name {
+    /// 自动化 `process`：像点了一下那样切换所有过程块的展开。
+    static let westieToggleProcess = Notification.Name("westieToggleProcess")
+}
+#endif

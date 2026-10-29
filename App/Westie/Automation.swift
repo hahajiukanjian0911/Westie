@@ -9,6 +9,7 @@ import WestieKit
 ///
 /// 步骤：`workspace:<路径>` `new` `prompt:<文本>` `wait:<秒>` `idle`（等回合结束）
 ///      `approve` `reject` `answer:<选项>` `select:<序号或会话 id>` `earlier[:<页数>]`（往前翻页） `shot:<png 路径>` `dump` `quit`
+///      `process`（像点了一下那样切换所有过程块的展开）
 ///      面板：`split:<序号>`（并排打开第 n 个会话） `move:<面板>`（聚焦窗口移到 top/primary/center/secondary/bottom）
 ///      `toggle:<面板>` `hide`（收起聚焦窗口） `appearance:dark|light`（只改 App 外观） `layout`（记录各面板的窗口）
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
@@ -155,6 +156,8 @@ enum Automation {
                 if let question = model.questions.first, let item = question.items.first {
                     await model.answer(question, selections: [item.id: [argument]], custom: [:])
                 }
+            case "process":
+                NotificationCenter.default.post(name: .westieToggleProcess, object: nil)
             case "shot":
                 try? await Task.sleep(for: .milliseconds(400))
                 note(snapshot(to: URL(filePath: argument)) ? "shot \(argument)" : "FAIL shot \(argument)")

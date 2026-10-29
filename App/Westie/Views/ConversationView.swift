@@ -105,8 +105,14 @@ struct ConversationView: View {
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
                 guard following, new > old else { return }
-                withAnimation(.easeOut(duration: 0.3)) { scrollPosition.scrollTo(edge: .bottom) }
+                // 回复生成中平滑跟上；空闲时（打开会话后逐段量出真实高度等）直接贴住底部，不出现滚动
+                if running {
+                    withAnimation(.easeOut(duration: 0.3)) { scrollPosition.scrollTo(edge: .bottom) }
+                } else {
+                    scrollPosition.scrollTo(edge: .bottom)
+                }
             }
+            .environment(\.pauseFollowing) { following = false }
             .onChange(of: conversation.transcript.items.last?.id) {
                 // 自己发出新消息时回到跟随。看末条换没换，不看条数：往前翻页只在前面加，末条不变
                 if case .user = conversation.transcript.items.last { following = true }
