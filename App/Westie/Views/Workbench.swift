@@ -352,6 +352,9 @@ private struct WindowTile: View {
     private var title: some View {
         let hidden = layout.hiddenWindows(in: panel)
         let label = HStack(spacing: 2) {
+            if window.content == .sessions {
+                AppLogo(size: 20).padding(.trailing, 4)
+            }
             Text(window.content.title(model: model))
                 .lineLimit(1)
             if !hidden.isEmpty {

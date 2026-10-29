@@ -53,10 +53,13 @@ struct RootView: View {
     private var status: some View {
         switch model.phase {
         case .starting, .ready:
-            Text("Westie")
-                .font(.system(size: 15, weight: .semibold))
-                .tracking(0.3)
-                .foregroundStyle(palette.ink3)
+            VStack(spacing: 10) {
+                AppLogo(size: 72)
+                Text("Westie")
+                    .font(.system(size: 15, weight: .semibold))
+                    .tracking(0.3)
+                    .foregroundStyle(palette.ink3)
+            }
         case .waitingForDSH:
             ContentUnavailableView {
                 Label("DeepSeek Harness 正在运行", systemImage: "pause.circle")

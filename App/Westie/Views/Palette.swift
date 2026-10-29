@@ -139,6 +139,20 @@ extension View {
     }
 }
 
+/// App 图标（西高地，App/Westie/Westie.icon），用在会话列表标题和启动画面。
+/// 图标画布四周自带留白，size 指整个画布。
+struct AppLogo: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
 enum Metrics {
     /// 外框留白，也是面板之间、窗口之间的缝。
     static let gap: CGFloat = 8
