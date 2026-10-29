@@ -8,7 +8,7 @@ import WestieKit
 /// 只调用 App 自己的模型方法、截自己窗口的内容，不合成任何鼠标键盘事件，也不前置窗口。
 ///
 /// 步骤：`workspace:<路径>` `new` `prompt:<文本>` `wait:<秒>` `idle`（等回合结束）
-///      `approve` `reject` `answer:<选项>` `select:<序号>` `shot:<png 路径>` `dump` `quit`
+///      `approve` `reject` `answer:<选项>` `select:<序号或会话 id>` `earlier[:<页数>]`（往前翻页） `shot:<png 路径>` `dump` `quit`
 ///      面板：`split:<序号>`（并排打开第 n 个会话） `move:<面板>`（聚焦窗口移到 top/primary/center/secondary/bottom）
 ///      `toggle:<面板>` `hide` `appearance:dark|light`（收起聚焦窗口） `layout`（记录各面板的窗口）
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
@@ -102,9 +102,21 @@ enum Automation {
             case "select":
                 await until { !model.board.ordered.isEmpty }
                 let all = model.board.ordered.flatMap { model.sessions(in: $0) }
-                guard let index = Int(argument), all.indices.contains(index) else { note("FAIL 没有第 \(argument) 个会话"); continue }
-                model.selectedSessionId = all[index].id
+                // 序号或会话 id
+                guard let id = Int(argument).flatMap({ all.indices.contains($0) ? all[$0].id : nil })
+                    ?? all.first(where: { $0.id == argument })?.id else { note("FAIL 没有会话 \(argument)"); continue }
+                model.selectedSessionId = id
                 await until { model.conversation?.isLoading == false }
+            case "earlier":
+                // 往前翻页 n 次（默认翻到底），只读。
+                guard let conversation = model.conversation else { note("FAIL 没有打开的会话"); continue }
+                var pages = 0
+                while conversation.hasEarlierHistory, pages < (Int(argument) ?? .max) {
+                    await conversation.loadEarlier()
+                    pages += 1
+                    if let error = conversation.earlierError { note("FAIL earlier \(error)"); break }
+                }
+                note("earlier pages=\(pages) firstSeq=\(conversation.transcript.firstSeq ?? -1) hasMore=\(conversation.hasEarlierHistory)")
             case "workspace":
                 if !model.board.ordered.contains(where: { $0.path == argument }) {
                     await model.addWorkspace(path: argument)

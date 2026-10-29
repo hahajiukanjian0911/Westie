@@ -69,3 +69,29 @@ private func fixture(_ name: String) throws -> (follow: [JSONValue], workspace: 
     #expect(board.ordered.first?.title == "ws1")
     #expect(board.ordered.first?.sessionIds.isEmpty == false)
 }
+
+@Test func prependedPageMatchesFullHistory() throws {
+    var full = Transcript()
+    var events: [JSONValue] = []
+    for frame in try fixture("bash").follow {
+        full.apply(followFrame: frame)
+        if frame["type"]?.stringValue == "snapshot" {
+            events += (frame["records"]?.arrayValue ?? []).compactMap { $0["event"] }
+        } else if frame["type"]?.stringValue == "event", let event = frame["event"] {
+            events.append(event)
+        }
+    }
+    // 切在工具调用和工具结果之间：结果先到（在较新的一页），调用随后翻页补上。
+    let resultIndex = try #require(events.firstIndex { $0["type"]?.stringValue == "tool/result" })
+    var paged = Transcript()
+    events[resultIndex...].forEach { paged.apply(event: $0) }
+    paged.prepend(pageRecords: events[..<resultIndex].map { ["type": "event", "event": $0] })
+
+    #expect(paged.items == full.items)
+    #expect(paged.firstSeq == full.firstSeq)
+    #expect(paged.lastSeq == full.lastSeq)
+    #expect(paged.running == full.running)
+    // 重复的一页不会再插一遍。
+    paged.prepend(pageRecords: events[..<resultIndex].map { ["type": "event", "event": $0] })
+    #expect(paged.items == full.items)
+}

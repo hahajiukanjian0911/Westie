@@ -45,7 +45,11 @@ public struct Transcript: Sendable, Equatable {
     public private(set) var live: Live?
     public private(set) var running = false
     public private(set) var lastSeq = -1
+    /// 已加载的最早一条日志事件的 seq；往前翻页时作为 `session/page` 的 beforeSeq。
+    public var firstSeq: Int? { events.first.flatMap(Self.seq(of:)) }
     private var toolIndex: [String: Int] = [:]
+    /// 已应用的全部日志事件（按 seq 升序）；往前翻页时整体重放，让跨页的工具调用和结果能对上。
+    private var events: [JSONValue] = []
 
     public init() {}
 
@@ -67,11 +71,30 @@ public struct Transcript: Sendable, Equatable {
         }
     }
 
+    /// 把 `session/page` 返回的更早一页记录接到最前面。
+    public mutating func prepend(pageRecords records: [JSONValue]) {
+        let first = firstSeq ?? Int.max
+        let older = records.compactMap { record -> JSONValue? in
+            guard record["type"]?.stringValue == "event", let event = record["event"],
+                  let seq = Self.seq(of: event), seq < first else { return nil }
+            return event
+        }
+        guard !older.isEmpty else { return }
+        let all = older + events
+        let keptLive = live
+        items = []
+        toolIndex = [:]
+        events = []
+        lastSeq = -1
+        running = false
+        all.forEach { apply(event: $0) }
+        live = keptLive
+    }
+
     public mutating func apply(event: JSONValue) {
-        guard case .number(let seqValue) = event["seq"] else { return }
-        let seq = Int(seqValue)
-        guard seq > lastSeq else { return }
+        guard let seq = Self.seq(of: event), seq > lastSeq else { return }
         lastSeq = seq
+        events.append(event)
         let data = event["data"] ?? .null
 
         switch event["type"]?.stringValue {
@@ -141,6 +164,11 @@ public struct Transcript: Sendable, Equatable {
     }
 
     // MARK: - Helpers
+
+    static func seq(of event: JSONValue) -> Int? {
+        guard case .number(let value) = event["seq"] else { return nil }
+        return Int(value)
+    }
 
     static func text(of content: JSONValue?) -> String {
         if let text = content?.stringValue { return text }

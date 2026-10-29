@@ -15,14 +15,22 @@ struct ConversationView: View {
         conversation.transcript.running || model.sessions[conversation.sessionId]?.running == true
     }
 
+    /// 往前加载一页，并把原来最上面那条留在原处，阅读位置不跳。
+    private func loadEarlier() {
+        let anchor = conversation.transcript.items.first?.id
+        Task {
+            await conversation.loadEarlier()
+            // 还在跟随到底（刚打开、内容不满一屏）就留在底部；只有往上翻着读时才钉住原位置。
+            if let anchor, !following { scrollPosition.scrollTo(id: anchor, anchor: .top) }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if conversation.hasEarlierHistory {
-                        Text("更早的消息暂未加载")
-                            .font(.caption).foregroundStyle(.tertiary)
-                            .frame(maxWidth: .infinity)
+                        EarlierHistoryRow(conversation: conversation, load: loadEarlier)
                     }
                     ForEach(conversation.transcript.items) { item in
                         TranscriptItemView(item: item)
@@ -43,6 +51,7 @@ struct ConversationView: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .frame(maxWidth: 760, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
@@ -87,5 +96,28 @@ struct ConversationView: View {
                 .padding(.bottom, 16)
                 .frame(maxWidth: .infinity)
         }
+    }
+}
+
+/// 列表顶端：滚到这里就自动加载更早的消息；出错时给一个重试。
+private struct EarlierHistoryRow: View {
+    let conversation: ConversationModel
+    let load: () -> Void
+
+    var body: some View {
+        Group {
+            if conversation.isLoadingEarlier {
+                ProgressView().controlSize(.small)
+            } else if let error = conversation.earlierError {
+                HStack(spacing: 6) {
+                    Text("更早的消息加载失败：\(error)").lineLimit(1)
+                    Button("重试", action: load).buttonStyle(.link)
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Color.clear.frame(height: 1).onAppear(perform: load)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 20)
     }
 }
