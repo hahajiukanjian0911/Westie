@@ -152,7 +152,12 @@ struct ProcessView: View {
     private var labelKey: String {
         guard active else { return "done" }
         if let call = runningCall { return call.id }
-        return "thinking-\(thinkingLine)"
+        // 按第几句换，不按内容：同一句往后长时原地更新，不然每来一个字就淡入淡出一次、叠出重影
+        return "thinking-\(thinkingLineIndex)"
+    }
+
+    private var thinkingLineIndex: Int {
+        (liveReasoning ?? "").split(whereSeparator: \.isNewline).count { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
     /// 正在想的那一句：流式思考的最后一行非空文字。
@@ -182,6 +187,7 @@ struct ProcessView: View {
             case .run: "运行 \(n) 条命令"
             case .search: "搜索 \(n) 次"
             case .web: "打开 \(n) 个网页"
+            case .ask: "提问 \(n) 次"
             case .other: "调用 \(n) 个工具"
             }
         }
@@ -209,6 +215,7 @@ struct ProcessView: View {
         case .run: "apple.terminal"
         case .search: "magnifyingglass"
         case .web: "globe"
+        case .ask: "questionmark.bubble"
         case .other: "wrench.and.screwdriver"
         }
     }
@@ -220,6 +227,7 @@ struct ProcessView: View {
         case .run: "运行"
         case .search: "搜索"
         case .web: "打开"
+        case .ask: "提问"
         case .other: "调用"
         }
     }

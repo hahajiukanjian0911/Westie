@@ -57,7 +57,7 @@ extension Transcript {
 extension Transcript.ToolCall {
     /// 摘要按动作计数用的分类。
     public enum Kind: Sendable, CaseIterable {
-        case read, edit, run, search, web, other
+        case read, edit, run, search, web, ask, other
     }
 
     public var kind: Kind {
@@ -67,6 +67,7 @@ extension Transcript.ToolCall {
         case "bash", "pwsh", "bash_persistent", "pwsh_persistent": .run
         case "grep", "glob", "web_search": .search
         case "web_fetch": .web
+        case "ask_user_question", "ask_user": .ask
         default: name.hasPrefix("terminal_") ? .run : .other
         }
     }
@@ -74,6 +75,7 @@ extension Transcript.ToolCall {
     /// 过程列表里的一行：文件类只留最后两级路径，其余用原摘要。
     public var stepText: String {
         let text = summary
+        if kind == .ask { return text.isEmpty ? "向你提问" : text }
         guard kind == .read || kind == .edit, text.hasPrefix("/") else { return text.isEmpty ? name : text }
         return text.split(separator: "/").suffix(2).joined(separator: "/")
     }

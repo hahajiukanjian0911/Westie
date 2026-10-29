@@ -126,5 +126,7 @@ private func fixture(_ name: String) throws -> (follow: [JSONValue], workspace: 
     #expect(call("terminal_send").kind == .run)
     #expect(call("glob").kind == .search)
     #expect(call("todo_write").kind == .other)
+    #expect(call("ask_user_question").kind == .ask)
+    #expect(call("ask_user_question").stepText == "向你提问")
     #expect(call("read", .object(["file_path": .string("/Users/a/Development/README.md")])).stepText == "Development/README.md")
 }
