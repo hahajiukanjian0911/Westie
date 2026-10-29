@@ -31,6 +31,7 @@ struct MarkdownText: View {
     private func styled(_ content: StructuredText) -> some View {
         content
             .font(typography.chat)
+            .tracking(typography.chatTracking(size: typography.chatSize))
             .foregroundStyle(palette.ink2)
             .textual.textSelection(.enabled)
             .textual.inlineStyle(
@@ -41,7 +42,9 @@ struct MarkdownText: View {
                     .link(.foregroundColor(DynamicColor(palette.ink)),
                           .underlineStyle(Text.LineStyle(pattern: .solid, color: palette.ink5)))
             )
-            .textual.paragraphStyle(BodyParagraphStyle())
+            .textual.paragraphStyle(BodyParagraphStyle(
+                lineSpacing: typography.chatLineSpacingEm, size: typography.chatSize, spacing: typography.paragraphSpacing
+            ))
             .textual.headingStyle(BodyHeadingStyle(palette: palette))
             .textual.listItemStyle(BodyListItemStyle())
             .textual.listItemSpacing(.fontScaled(top: 4 / MarkdownMetrics.body))
@@ -74,24 +77,26 @@ struct MarkdownText: View {
     }
 }
 
-/// 排版数值照抄设计稿 v1 的 CSS（`.new .md`）。
+/// 排版数值照抄设计稿 v1 的 CSS（`.new .md`）；正文行高、段距、字距与代码行高取外观设置。
 enum MarkdownMetrics {
     /// 正文的基准字号；实际字号取外观设置里的对话字号，标题按与它的比例缩放。
     static let body: CGFloat = 14
-    /// 中文正文行高约 1.75 倍：系统字体自然行高之外再加的行距（按 14pt 折算）。
-    static let bodyLineSpacing: CGFloat = 0.5
-    static let halfLeading: CGFloat = 3.5
 }
 
 // MARK: - 排版（v1）
 
 private struct BodyParagraphStyle: StructuredText.ParagraphStyle {
+    /// 自然行高之外再加的行距（以字号为单位）、正文字号、段距（pt）。
+    let lineSpacing: CGFloat
+    let size: CGFloat
+    let spacing: CGFloat
+
     func makeBody(configuration: Configuration) -> some View {
         // 上下各留半个行距，对应 CSS 行高在单行上下留出的空隙
         configuration.label
-            .textual.lineSpacing(.fontScaled(MarkdownMetrics.bodyLineSpacing))
-            .padding(.vertical, MarkdownMetrics.halfLeading)
-            .textual.blockSpacing(StructuredText.BlockSpacing(top: 12))
+            .textual.lineSpacing(.fontScaled(lineSpacing))
+            .padding(.vertical, lineSpacing * size / 2)
+            .textual.blockSpacing(StructuredText.BlockSpacing(top: spacing))
     }
 }
 
@@ -253,7 +258,7 @@ private struct CodeCard: View {
 
             Overflow {
                 configuration.label
-                    .textual.lineSpacing(.fontScaled(0.4))
+                    .textual.lineSpacing(.fontScaled(typography.codeLineSpacingEm))
                     .font(typography.code)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16).padding(.bottom, 14)

@@ -44,7 +44,7 @@ final class AppearanceSettings {
     var mode: Mode { didSet { save(); apply() } }
     var themeIndex: Int { didSet { save() } }
     var grain: Bool { didSet { save() } }
-    /// 字体：存的是推荐列表里的名字，找不到就回到列表第一款（系统字体）。
+    /// 字体：存的是推荐列表里的名字，找不到就回到列表第一款（系统字体）。字号、行高等是数值。
     var uiLatin: String { didSet { save() } }
     var uiCJK: String { didSet { save() } }
     var chatLatin: String { didSet { save() } }
@@ -52,6 +52,53 @@ final class AppearanceSettings {
     var chatSize: Double { didSet { save() } }
     var codeFont: String { didSet { save() } }
     var codeSize: Double { didSet { save() } }
+    var lineHeight: Double { didSet { save() } }
+    var paragraphSpacing: Double { didSet { save() } }
+    var tracking: Double { didSet { save() } }
+    var codeLineHeight: Double { didSet { save() } }
+
+    /// 一组搭配：一点即换全部字体、字号和行距（设计稿 v4 的 B）。
+    struct FontPreset: Identifiable {
+        let name: String
+        var uiLatin = "SF Pro", uiCJK = "苹方", chatLatin = "SF Pro", chatCJK = "苹方", code = "SF Mono"
+        var chatSize = 14.0, codeSize = 12.5, lineHeight = 1.7, paragraphSpacing = 12.0
+        var id: String { name }
+    }
+
+    static let fontPresets: [FontPreset] = [
+        FontPreset(name: "系统"),
+        FontPreset(name: "阅读", chatLatin: "New York", chatCJK: "霞鹜文楷", code: "Maple Mono NF CN",
+                   chatSize: 16, codeSize: 13.5, lineHeight: 1.95, paragraphSpacing: 18),
+        FontPreset(name: "书卷", chatLatin: "Georgia", chatCJK: "宋体-简", code: "Menlo", chatSize: 15),
+        FontPreset(name: "清爽", uiLatin: "Helvetica Neue", uiCJK: "冬青黑体", chatLatin: "Helvetica Neue", chatCJK: "冬青黑体",
+                   code: "Maple Mono NF CN"),
+    ]
+
+    /// 行距三档：行高与段距一起变。
+    static let densities: [(name: String, lineHeight: Double, paragraphSpacing: Double)] = [
+        ("紧凑", 1.5, 8), ("标准", 1.7, 12), ("宽松", 1.95, 18),
+    ]
+
+    func apply(_ preset: FontPreset) {
+        uiLatin = preset.uiLatin; uiCJK = preset.uiCJK
+        chatLatin = preset.chatLatin; chatCJK = preset.chatCJK; codeFont = preset.code
+        chatSize = preset.chatSize; codeSize = preset.codeSize
+        lineHeight = preset.lineHeight; paragraphSpacing = preset.paragraphSpacing
+        tracking = 0; codeLineHeight = 1.55
+    }
+
+    func matches(_ preset: FontPreset) -> Bool {
+        uiLatin == preset.uiLatin && uiCJK == preset.uiCJK && chatLatin == preset.chatLatin && chatCJK == preset.chatCJK
+            && codeFont == preset.code && chatSize == preset.chatSize && codeSize == preset.codeSize
+            && lineHeight == preset.lineHeight && paragraphSpacing == preset.paragraphSpacing
+            && tracking == 0 && codeLineHeight == 1.55
+    }
+
+    /// 只拖一根字号滑杆时，代码字号跟着走：对话字号的 0.9 倍，取到半号。
+    func setChatSizeKeepingRatio(_ size: Double) {
+        chatSize = size
+        codeSize = (size * 0.9 * 2).rounded() / 2
+    }
 
     var typography: Typography {
         Typography(
@@ -61,7 +108,11 @@ final class AppearanceSettings {
             chatCJK: FontOption.find(chatCJK, in: FontOption.chatCJK),
             chatSize: chatSize,
             codeFont: FontOption.find(codeFont, in: FontOption.code),
-            codeSize: codeSize
+            codeSize: codeSize,
+            lineHeight: lineHeight,
+            paragraphSpacing: paragraphSpacing,
+            tracking: tracking,
+            codeLineHeight: codeLineHeight
         )
     }
 
@@ -92,6 +143,10 @@ final class AppearanceSettings {
         chatSize = fonts["chatSize"] as? Double ?? 14
         codeFont = fonts["code"] as? String ?? FontOption.code[0].name
         codeSize = fonts["codeSize"] as? Double ?? 12.5
+        lineHeight = fonts["lineHeight"] as? Double ?? 1.7
+        paragraphSpacing = fonts["paragraphSpacing"] as? Double ?? 12
+        tracking = fonts["tracking"] as? Double ?? 0
+        codeLineHeight = fonts["codeLineHeight"] as? Double ?? 1.55
     }
 
     /// 浅深色落在 App 级 appearance 上（菜单、弹层一起变），不动系统设置。
@@ -107,6 +162,7 @@ final class AppearanceSettings {
         let fonts: [String: Any] = [
             "uiLatin": uiLatin, "uiCJK": uiCJK, "chatLatin": chatLatin, "chatCJK": chatCJK,
             "chatSize": chatSize, "code": codeFont, "codeSize": codeSize,
+            "lineHeight": lineHeight, "paragraphSpacing": paragraphSpacing, "tracking": tracking, "codeLineHeight": codeLineHeight,
         ]
         defaults.set(["mode": mode.rawValue, "theme": themeIndex, "grain": grain, "fonts": fonts], forKey: Self.key)
     }

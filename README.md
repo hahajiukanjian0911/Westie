@@ -16,7 +16,7 @@ DeepSeek Harness（DSH）的原生 macOS 客户端：沿用 DSH 内核，界面�
 
 拖放规则（设计稿 `deliverables/Westie/reviews/2026-10-28-panels/v3`）：拖动时布局不动，只有一张小卡跟着指针，落点浮出松手后的样子。外框最外一圈（24pt，停 150ms）打开那条边上没显示的面板；窗口卡片的前三成或后三成表示并排插在它前面或后面，正中间表示叠进去；指针到对话面板上沿会浮出五格布局条。标题栏的布局按钮弹出同一张五格图，不拖也能移。窗口移走后，如果原面板空了、还有收着的窗口，就原地列出它们供补位。对话面板里的窗口全收着时也一直这样列出。指针靠近窗口顶部正中会浮出一根拖动条，拖它或标题栏空白处移动窗口，拖动中按 Esc 取消。系统自动拖动 App 已关掉，只有外框露出的地方能拖 App（双击按系统设置缩放）。
 
-设置是工作台里的一张卡片（设计稿 `deliverables/Westie/reviews/2026-10-29-settings/v1` 方向 B）：⌘, 或侧栏底部「设置」在对话面板里打开。通用、账号、高级写进内核（`settings/update`、`credentials/*`、`account/*`）；外观（浅深色、主题、颗粒质感、字体）是 Westie 自己的，存在 UserDefaults。字体分界面、对话、代码三类（`Typography`）：西文字体打底，中文字体挂在 cascade list 上。
+设置是工作台里的一张卡片（设计稿 `deliverables/Westie/reviews/2026-10-29-settings/v1` 方向 B）：⌘, 或侧栏底部「设置」在对话面板里打开。通用、账号、高级写进内核（`settings/update`、`credentials/*`、`account/*`）；外观（浅深色、主题、颗粒质感、字体）是 Westie 自己的，存在 UserDefaults。字体分界面、对话、代码三类（`Typography`）：西文字体打底，中文字体挂在 cascade list 上；字体页按 v4 方向 B：四组搭配、一根字号滑杆、行距三档，展开后逐项改字体、字号、行高、段距、字距和代码行高。
 
 App 启动时拉起内核（Node 子进程，profile `westie`），用启动令牌经 `/connect` 接入，一元调用走 `POST /api/<方法>`，流走 WebSocket `/api/remote.mux`。
 

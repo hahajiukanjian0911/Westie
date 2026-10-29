@@ -69,7 +69,7 @@ struct SettingsView: View {
         switch model.settings.tab {
         case .general: GeneralPage(model: model)
         case .account: AccountPage(settings: model.settings)
-        case .appearance: AppearancePage(appearance: model.appearance)
+        case .appearance: AppearancePage(appearance: model.appearance, settings: model.settings)
         case .advanced: AdvancedPage(settings: model.settings)
         }
     }
@@ -152,12 +152,15 @@ private struct SettingsGroup<Content: View>: View {
 
 private struct SettingsRow<Trailing: View>: View {
     let label: String
+    /// 从属于上一行的细项（如「对话」下的字号、行高）：标签淡一档、缩进。
+    var secondary = false
     @ViewBuilder var trailing: Trailing
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 16) {
-            Text(label).foregroundStyle(palette.ink).lineLimit(1)
+            Text(label).foregroundStyle(secondary ? palette.ink3 : palette.ink).lineLimit(1)
+                .padding(.leading, secondary ? 12 : 0)
             Spacer(minLength: 8)
             trailing
         }
@@ -345,6 +348,7 @@ private struct APIKeyEditor: View {
 
 private struct AppearancePage: View {
     @Bindable var appearance: AppearanceSettings
+    @Bindable var settings: SettingsModel
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -372,167 +376,250 @@ private struct AppearancePage: View {
                 Toggle("颗粒质感", isOn: $appearance.grain).toggleStyle(.switch).labelsHidden().controlSize(.small)
             }
         }
-        FontSettings(appearance: appearance)
+        FontSettings(appearance: appearance, expanded: $settings.fontsExpanded)
     }
 }
 
 // MARK: - 字体
 
-enum FontRole: String, CaseIterable, Identifiable {
-    case ui, chat, code
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .ui: "界面"
-        case .chat: "对话"
-        case .code: "代码"
-        }
-    }
-}
-
-/// 字体一组：上面实时预览，下面三行；悬停某一行，预览里对应那段亮起。
+/// 字体一组（设计稿 v4 的 B）：先挑四组搭配之一，下面固定高度的预览、一根字号滑杆、行距三档；
+/// 想细调再展开逐项自定义。预览高度不随字号、行高变，拖动时下面的控件不动。
 private struct FontSettings: View {
     @Bindable var appearance: AppearanceSettings
+    @Binding var expanded: Bool
     @Environment(\.palette) private var palette
-    @State private var lit: FontRole?
-    @State private var open: FontRole?
 
     var body: some View {
-        let typography = appearance.typography
-        SettingsGroup(title: "字体") {
-            VStack(alignment: .leading, spacing: 10) {
-                previewLine(.ui) {
-                    Text("回复排版按设计稿重做 · Markdown rendering").font(typography.ui(13)).foregroundStyle(palette.ink2)
-                }
-                previewLine(.chat) {
-                    Text("已按设计稿调整：标题上方 18pt、列表项间距 6pt。Streaming 时最后一段不再整段重排，长回复读起来更稳。")
-                        .font(typography.chat)
-                        .lineSpacing(typography.chatSize * 0.5 * MarkdownMetrics.bodyLineSpacing)
-                        .foregroundStyle(palette.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                previewLine(.code) {
-                    Text("let gap = Metrics.gap   // 外框留白，也是窗口之间的缝")
-                        .font(typography.code)
-                        .foregroundStyle(palette.ink2)
-                        .lineLimit(1)
-                        .padding(.horizontal, 10).padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(palette.code, in: .rect(cornerRadius: 6))
+        let preset = AppearanceSettings.fontPresets.firstIndex { appearance.matches($0) }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("字体").uiFont(12).foregroundStyle(palette.ink3).padding(.horizontal, 2)
+            HStack(spacing: 8) {
+                ForEach(Array(AppearanceSettings.fontPresets.enumerated()), id: \.offset) { index, item in
+                    PresetCard(preset: item, selected: preset == index) { appearance.apply(item) }
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 14)
-            ForEach(FontRole.allCases) { role in
-                SettingsRow(label: role.title) {
-                    FontValueButton(role: role, appearance: appearance, open: Binding(
-                        get: { open == role }, set: { open = $0 ? role : nil }
-                    ))
+            .padding(.bottom, 6)
+            SettingsGroup {
+                FontPreview(typography: appearance.typography)
+                SettingsRow(label: "字号") {
+                    ValueSlider(value: appearance.chatSize, range: Typography.chatSizes, step: 1, letters: true) {
+                        appearance.setChatSizeKeepingRatio($0)
+                    }
                 }
-                .onHover { lit = $0 ? role : (lit == role ? nil : lit) }
+                SettingsRow(label: "行距") {
+                    Picker("行距", selection: Binding(
+                        get: { AppearanceSettings.densities.firstIndex { $0.lineHeight == appearance.lineHeight && $0.paragraphSpacing == appearance.paragraphSpacing } ?? -1 },
+                        set: { index in
+                            guard AppearanceSettings.densities.indices.contains(index) else { return }
+                            appearance.lineHeight = AppearanceSettings.densities[index].lineHeight
+                            appearance.paragraphSpacing = AppearanceSettings.densities[index].paragraphSpacing
+                        }
+                    )) {
+                        ForEach(Array(AppearanceSettings.densities.enumerated()), id: \.offset) { index, density in
+                            Text(density.name).tag(index)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            }
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").uiFont(9, .semibold).rotationEffect(.degrees(expanded ? 90 : 0))
+                    Text(preset == nil ? "自定义（已改动）" : "逐项自定义").uiFont(12)
+                }
+                .foregroundStyle(palette.ink3)
+                .padding(.horizontal, 2).padding(.top, 4)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                SettingsGroup { customRows }
             }
         }
     }
 
-    private func previewLine(_ role: FontRole, @ViewBuilder content: () -> some View) -> some View {
-        content()
-            .padding(.horizontal, role == .code ? 0 : 6).padding(.vertical, role == .code ? 0 : 2)
-            .background(lit == role && role != .code ? palette.placeholder : .clear, in: .rect(cornerRadius: 6))
-            .overlay {
-                if lit == role && role == .code {
-                    RoundedRectangle(cornerRadius: 6).strokeBorder(palette.previewRing, lineWidth: 1)
-                }
-            }
-            .padding(.horizontal, role == .code ? 0 : -6)
-            .animation(.easeOut(duration: 0.15), value: lit)
+    @ViewBuilder
+    private var customRows: some View {
+        SettingsRow(label: "界面") {
+            FontMenuButton(options: FontOption.uiLatin, selected: appearance.uiLatin, others: { InstalledFonts.all }) { appearance.uiLatin = $0 }
+            FontMenuButton(options: FontOption.uiCJK, selected: appearance.uiCJK, others: { InstalledFonts.cjk }) { appearance.uiCJK = $0 }
+        }
+        SettingsRow(label: "对话") {
+            FontMenuButton(options: FontOption.chatLatin, selected: appearance.chatLatin, others: { InstalledFonts.all }) { appearance.chatLatin = $0 }
+            FontMenuButton(options: FontOption.chatCJK, selected: appearance.chatCJK, others: { InstalledFonts.cjk }) { appearance.chatCJK = $0 }
+        }
+        SettingsRow(label: "字号", secondary: true) {
+            ValueSlider(value: appearance.chatSize, range: Typography.chatSizes, step: 1, letters: true) { appearance.chatSize = $0 }
+        }
+        SettingsRow(label: "行高", secondary: true) {
+            ValueSlider(value: appearance.lineHeight, range: Typography.lineHeights, step: 0.05, format: { String(format: "%.2f", $0) }) { appearance.lineHeight = $0 }
+        }
+        SettingsRow(label: "段距", secondary: true) {
+            ValueSlider(value: appearance.paragraphSpacing, range: Typography.paragraphSpacings, step: 1, format: { "\(Int($0)) pt" }) { appearance.paragraphSpacing = $0 }
+        }
+        SettingsRow(label: "字距", secondary: true) {
+            ValueSlider(value: appearance.tracking, range: Typography.trackings, step: 0.01, format: { ($0 > 0 ? "+" : "") + String(format: "%.2f", $0) }) { appearance.tracking = $0 }
+        }
+        SettingsRow(label: "代码") {
+            FontMenuButton(options: FontOption.code, selected: appearance.codeFont, mono: true, others: { InstalledFonts.monospaced }) { appearance.codeFont = $0 }
+        }
+        SettingsRow(label: "字号", secondary: true) {
+            ValueSlider(value: appearance.codeSize, range: Typography.codeSizes, step: 0.5, letters: true) { appearance.codeSize = $0 }
+        }
+        SettingsRow(label: "行高", secondary: true) {
+            ValueSlider(value: appearance.codeLineHeight, range: Typography.codeLineHeights, step: 0.05, format: { String(format: "%.2f", $0) }) { appearance.codeLineHeight = $0 }
+        }
     }
 }
 
-/// 行右侧：当前字体名用它自己的字形写出来，点开弹出推荐字体。
-private struct FontValueButton: View {
-    let role: FontRole
-    @Bindable var appearance: AppearanceSettings
-    @Binding var open: Bool
+/// 搭配卡片：用这组的对话字体写「Aa 汉字」，代码字体写「{ code }」。
+private struct PresetCard: View {
+    let preset: AppearanceSettings.FontPreset
+    let selected: Bool
+    let action: () -> Void
     @Environment(\.palette) private var palette
     @State private var hovering = false
 
     var body: some View {
-        let typography = appearance.typography
-        Button { open.toggle() } label: {
-            HStack(spacing: 6) {
-                switch role {
-                case .ui:
-                    name(typography.uiLatin); dot; name(typography.uiCJK)
-                case .chat:
-                    name(typography.chatLatin); dot; name(typography.chatCJK); dot; size(typography.chatSize)
-                case .code:
-                    name(typography.codeFont, mono: true); dot; size(typography.codeSize)
-                }
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(palette.ink3)
+        let latin = FontOption.find(preset.chatLatin, in: FontOption.chatLatin)
+        let cjk = FontOption.find(preset.chatCJK, in: FontOption.chatCJK)
+        let code = FontOption.find(preset.code, in: FontOption.code)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Aa 汉字").font(Font(Typography.make(latin, cjk: cjk, size: 22, weight: .regular))).foregroundStyle(palette.ink)
+                Text("{ code }").font(Font(Typography.make(code, cjk: nil, size: 12, weight: .regular))).foregroundStyle(palette.ink3)
+                Spacer(minLength: 6)
+                Text(preset.name).uiFont(12).foregroundStyle(palette.ink2)
             }
-            .padding(.leading, 10).padding(.trailing, 8).frame(height: 26)
-            .background(open || hovering ? palette.placeholder : .clear, in: .rect(cornerRadius: 6))
-            .contentShape(Rectangle())
+            .lineLimit(1)
+            .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 10)
+            .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+            .background(palette.box, in: .rect(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? palette.accent : palette.boxStroke, lineWidth: selected ? 1.5 : 0.5))
+            .shadow(color: .black.opacity(hovering && !selected ? 0.06 : 0), radius: 4, y: 2)
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .popover(isPresented: $open, arrowEdge: .bottom) {
-            FontPicker(role: role, appearance: appearance)
-        }
-    }
-
-    private var dot: some View { Text("·").foregroundStyle(palette.ink4) }
-
-    private func name(_ option: FontOption, mono: Bool = false) -> some View {
-        Text(option.name)
-            .font(Font(Typography.make(option, cjk: nil, size: 13, weight: .regular)))
-            .foregroundStyle(palette.ink)
-            .lineLimit(1)
-    }
-
-    private func size(_ value: CGFloat) -> some View {
-        Text(Typography.sizeLabel(value)).foregroundStyle(palette.ink3).monospacedDigit()
+        .animation(.easeOut(duration: 0.15), value: selected)
     }
 }
 
-/// 推荐字体弹层：界面、对话分西文 / 中文两栏，代码一栏；没装的变淡，点一下复制安装命令。
-private struct FontPicker: View {
-    let role: FontRole
-    @Bindable var appearance: AppearanceSettings
+/// 预览：界面一行、对话两段、代码两行，排版同对话里的实际效果。高度固定，放不下的从底部淡出。
+private struct FontPreview: View {
+    let typography: Typography
     @Environment(\.palette) private var palette
+
+    var body: some View {
+        let size = typography.chatSize
+        let spacing = typography.chatLineSpacing(size: size)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("回复排版按设计稿重做 · Markdown rendering")
+                .font(typography.ui(13)).foregroundStyle(palette.ink2).lineLimit(1)
+            VStack(alignment: .leading, spacing: typography.paragraphSpacing) {
+                Text("已按设计稿调整：标题上方 18pt、列表项间距 6pt。Streaming 时最后一段不再整段重排，长回复读起来更稳。")
+                Text("代码块改用卡片底色，复制按钮悬停才出现。")
+            }
+            .font(typography.chat)
+            .lineSpacing(spacing)
+            .tracking(typography.chatTracking(size: size))
+            .padding(.vertical, spacing / 2)
+            .foregroundStyle(palette.ink)
+            .fixedSize(horizontal: false, vertical: true)
+            Text("let gap = Metrics.gap   // 外框留白\nlet radius = gap + 2")
+                .font(typography.code)
+                .lineSpacing(typography.codeLineSpacingEm * typography.codeSize)
+                .foregroundStyle(palette.ink2)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.code, in: .rect(cornerRadius: 6))
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .topLeading)
+        .clipped()
+        .mask {
+            VStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 18)
+            }
+        }
+    }
+
+    static let height: CGFloat = 236
+}
+
+/// 数值滑杆：值写在右边；拖动时按步长取整，只在值真的变了才写回。
+private struct ValueSlider: View {
+    let value: Double
+    let range: ClosedRange<CGFloat>
+    let step: Double
+    var letters = false
+    var format: (Double) -> String = { Typography.sizeLabel($0) }
+    let set: (Double) -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if letters { Text("A").uiFont(11).foregroundStyle(palette.ink3).fixedSize() }
+            Slider(value: Binding(get: { value }, set: { raw in
+                let rounded = ((raw / step).rounded() * step * 100).rounded() / 100
+                if rounded != value { set(rounded) }
+            }), in: Double(range.lowerBound)...Double(range.upperBound))
+            .frame(width: letters ? 150 : 160)
+            if letters { Text("A").uiFont(16).foregroundStyle(palette.ink3).fixedSize() }
+            Text(format(value)).monospacedDigit().foregroundStyle(palette.ink)
+                .frame(minWidth: 40, alignment: .trailing)
+        }
+        .fixedSize()
+    }
+}
+
+/// 字体下拉：按钮上的字体名用它自己的字形；点开是推荐列表，没装的点一下复制安装命令，最后是其他已装字体。
+private struct FontMenuButton: View {
+    let options: [FontOption]
+    let selected: String
+    var mono = false
+    let others: () -> [String]
+    let pick: (String) -> Void
+    @Environment(\.palette) private var palette
+    @State private var open = false
+    @State private var hovering = false
     @State private var copied: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            switch role {
-            case .ui:
-                HStack(alignment: .top, spacing: 8) {
-                    column("西文", FontOption.uiLatin, selected: appearance.uiLatin) { appearance.uiLatin = $0 }
-                    column("中文", FontOption.uiCJK, selected: appearance.uiCJK) { appearance.uiCJK = $0 }
-                }
-            case .chat:
-                HStack(alignment: .top, spacing: 8) {
-                    column("西文", FontOption.chatLatin, selected: appearance.chatLatin) { appearance.chatLatin = $0 }
-                    column("中文", FontOption.chatCJK, selected: appearance.chatCJK) { appearance.chatCJK = $0 }
-                }
-            case .code:
-                column(nil, FontOption.code, selected: appearance.codeFont) { appearance.codeFont = $0 }
+        let current = FontOption.find(selected, in: options)
+        Button { open.toggle() } label: {
+            HStack(spacing: 6) {
+                Text(current.name)
+                    .font(Font(Typography.make(current, cjk: nil, size: 13, weight: .regular)))
+                    .foregroundStyle(palette.ink)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").uiFont(9, .semibold).foregroundStyle(palette.ink3)
             }
-            Rectangle().fill(palette.boxStroke.opacity(0.7)).frame(height: 0.5).padding(.top, 2)
-            footer
+            .padding(.leading, 10).padding(.trailing, 7).frame(height: 26)
+            .background(open || hovering ? palette.placeholder : palette.box, in: .rect(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(palette.boxStroke, lineWidth: 0.5))
+            .contentShape(.rect)
         }
-        .padding(8)
-        .frame(width: role == .code ? 300 : 440)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .popover(isPresented: $open, arrowEdge: .bottom) { menu }
     }
 
-    private func column(_ title: String?, _ options: [FontOption], selected: String, pick: @escaping (String) -> Void) -> some View {
+    private var menu: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let title {
-                Text(title).uiFont(11, .medium).foregroundStyle(palette.ink3).padding(.horizontal, 8).padding(.vertical, 4)
-            }
-            ForEach(options) { option in
-                FontItem(option: option, selected: option.name == selected, mono: role == .code) {
+            ForEach(options.sorted { $0.installed && !$1.installed }) { option in
+                FontItem(option: option, selected: option.name == selected, mono: mono) {
                     if option.installed {
                         pick(option.name)
+                        open = false
                     } else if let cask = option.cask {
                         let command = "brew install --cask \(cask)"
                         NSPasteboard.general.clearContents()
@@ -541,53 +628,28 @@ private struct FontPicker: View {
                     }
                 }
             }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    @ViewBuilder
-    private var footer: some View {
-        HStack(spacing: 12) {
-            if let copied {
-                Text("已复制 \(copied)").uiFont(11).foregroundStyle(palette.ink3).lineLimit(1).truncationMode(.middle)
-            } else if role != .ui {
-                Text("字号").uiFont(12).foregroundStyle(palette.ink3)
-                let binding = role == .chat ? $appearance.chatSize : $appearance.codeSize
-                let range = role == .chat ? Typography.chatSizes : Typography.codeSizes
-                Text(Typography.sizeLabel(binding.wrappedValue))
-                    .monospacedDigit().frame(minWidth: 28, alignment: .trailing)
-                Stepper("字号", value: binding, in: Double(range.lowerBound)...Double(range.upperBound), step: 0.5).labelsHidden()
+            Rectangle().fill(palette.boxStroke.opacity(0.7)).frame(height: 0.5).padding(.vertical, 4)
+            HStack {
+                if let copied {
+                    Text("已复制 \(copied)").uiFont(11).foregroundStyle(palette.ink3).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer()
+                // 推荐之外的已装字体：系统菜单列出全部（中文只列含汉字的，代码只列等宽的）。
+                Menu("其他字体…") {
+                    ForEach(others(), id: \.self) { family in
+                        Button(family) { pick(family); open = false }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .uiFont(12)
+                .foregroundStyle(palette.ink3)
             }
-            Spacer()
-            otherFonts
+            .padding(.horizontal, 8).padding(.bottom, 2)
         }
-        .uiFont(12)
-        .padding(.horizontal, 8).padding(.top, 2).padding(.bottom, 2)
-    }
-
-    /// 推荐之外的已装字体：系统菜单列出全部（中文只列含汉字的，代码只列等宽的）。
-    @ViewBuilder
-    private var otherFonts: some View {
-        Menu("其他字体…") {
-            switch role {
-            case .ui:
-                Menu("西文") { families(InstalledFonts.all) { appearance.uiLatin = $0 } }
-                Menu("中文") { families(InstalledFonts.cjk) { appearance.uiCJK = $0 } }
-            case .chat:
-                Menu("西文") { families(InstalledFonts.all) { appearance.chatLatin = $0 } }
-                Menu("中文") { families(InstalledFonts.cjk) { appearance.chatCJK = $0 } }
-            case .code:
-                families(InstalledFonts.monospaced) { appearance.codeFont = $0 }
-            }
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .foregroundStyle(palette.ink3)
-    }
-
-    private func families(_ list: [String], pick: @escaping (String) -> Void) -> some View {
-        ForEach(list, id: \.self) { family in Button(family) { pick(family) } }
+        .padding(6)
+        .frame(width: 260)
     }
 }
 

@@ -15,7 +15,8 @@ import WestieKit
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
 ///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图）
 ///      设置：`settings[:<分页>]`（打开设置卡片并记录读到的值） `theme:<序号>`（换主题） `set:<键>=<值>`（写内核设置后重读）
-///      `font:<项>=<值>`（改字体，项见下方 font 分支）
+///      `font:<项>=<值>`（改字体、字号、行高等，`preset=<序号>` 换搭配，`expand=true` 展开逐项自定义；项见下方 font 分支）
+///      `modelpicker:<png 路径>`（离屏渲染输入框的模型弹层）
 ///
 /// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
@@ -202,10 +203,16 @@ enum Automation {
                 case "code": appearance.codeFont = parts[1]
                 case "chatSize": appearance.chatSize = Double(parts[1]) ?? appearance.chatSize
                 case "codeSize": appearance.codeSize = Double(parts[1]) ?? appearance.codeSize
+                case "lineHeight": appearance.lineHeight = Double(parts[1]) ?? appearance.lineHeight
+                case "paragraph": appearance.paragraphSpacing = Double(parts[1]) ?? appearance.paragraphSpacing
+                case "tracking": appearance.tracking = Double(parts[1]) ?? appearance.tracking
+                case "codeLineHeight": appearance.codeLineHeight = Double(parts[1]) ?? appearance.codeLineHeight
+                case "preset": appearance.apply(AppearanceSettings.fontPresets[min(Int(parts[1]) ?? 0, AppearanceSettings.fontPresets.count - 1)])
+                case "expand": model.settings.fontsExpanded = parts[1] == "true"
                 default: note("FAIL 未知字体项 \(parts[0])")
                 }
                 let t = appearance.typography
-                note("font ui=\(t.uiLatin.name)/\(t.uiCJK.name) chat=\(t.chatLatin.name)/\(t.chatCJK.name)@\(t.chatSize) code=\(t.codeFont.name)@\(t.codeSize) probe=\(Int(t.chatProbeWidth.rounded()))")
+                note("font ui=\(t.uiLatin.name)/\(t.uiCJK.name) chat=\(t.chatLatin.name)/\(t.chatCJK.name)@\(t.chatSize) code=\(t.codeFont.name)@\(t.codeSize) lh=\(t.lineHeight)/+\(String(format: "%.3f", t.chatLineSpacingEm))em para=\(t.paragraphSpacing) track=\(t.tracking) codeLh=\(t.codeLineHeight)/+\(String(format: "%.3f", t.codeLineSpacingEm))em probe=\(Int(t.chatProbeWidth.rounded()))")
                 try? await Task.sleep(for: .milliseconds(300))
             case "modelpicker":
                 // 模型弹层是 popover，cacheDisplay 截不到；离屏单独渲染一份核对字体与分组。

@@ -27,6 +27,8 @@ final class SettingsModel {
 
     /// 设置卡片当前的分页。
     var tab: SettingsTab = .general
+    /// 外观页的字体是否展开了逐项自定义。
+    var fontsExpanded = false
     private(set) var loaded = false
     private(set) var writable = true
     private(set) var defaultModel: DefaultModel?

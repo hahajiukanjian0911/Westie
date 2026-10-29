@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 字体：界面、对话、代码三类（设计稿 `deliverables/Westie/reviews/2026-10-29-settings/v2`）。
+/// 字体：界面、对话、代码三类（设计稿 `deliverables/Westie/reviews/2026-10-29-settings/v2`，交互与间距见 v4 的 B）。
 /// 界面和对话各挑一款西文、一款中文，中文字体挂在西文字体的 cascade list 上，只管西文没有的字；
 /// 代码只挑一款等宽字体，不带中文的等宽字体，汉字跟随对话的中文字体。
 struct FontOption: Identifiable, Hashable, Sendable {
@@ -50,6 +50,7 @@ struct FontOption: Identifiable, Hashable, Sendable {
         FontOption(name: "New York", family: nil, design: .serif, tag: "系统"),
         FontOption(name: "Charter", family: "Charter"),
         FontOption(name: "Georgia", family: "Georgia"),
+        FontOption(name: "Helvetica Neue", family: "Helvetica Neue"),
         FontOption(name: "Source Serif 4", family: "Source Serif 4", cask: "font-source-serif-4"),
     ]
     static let chatCJK: [FontOption] = [
@@ -58,6 +59,7 @@ struct FontOption: Identifiable, Hashable, Sendable {
         FontOption(name: "思源宋体", family: "Noto Serif CJK SC", cask: "font-noto-serif-cjk-sc"),
         FontOption(name: "宋体-简", family: "Songti SC"),
         FontOption(name: "楷体-简", family: "Kaiti SC"),
+        FontOption(name: "冬青黑体", family: "Hiragino Sans GB"),
     ]
     static let code: [FontOption] = [
         sfMono,
@@ -87,9 +89,40 @@ struct Typography: Equatable, Sendable {
     var chatSize: CGFloat = 14
     var codeFont = FontOption.sfMono
     var codeSize: CGFloat = 12.5
+    /// 对话正文的行高（字号的倍数）、段落之间的距离（pt）、字距（字号的倍数）。
+    var lineHeight: CGFloat = 1.7
+    var paragraphSpacing: CGFloat = 12
+    var tracking: CGFloat = 0
+    /// 代码的行高（字号的倍数）。
+    var codeLineHeight: CGFloat = 1.55
 
     static let chatSizes: ClosedRange<CGFloat> = 13...18
     static let codeSizes: ClosedRange<CGFloat> = 11...16
+    static let lineHeights: ClosedRange<CGFloat> = 1.4...2.1
+    static let paragraphSpacings: ClosedRange<CGFloat> = 4...24
+    static let trackings: ClosedRange<CGFloat> = -0.02...0.08
+    static let codeLineHeights: ClosedRange<CGFloat> = 1.3...1.9
+
+    /// 正文行高换算成 SwiftUI / Textual 的行距：字体自然行高之外再加多少（以字号为单位）。
+    var chatLineSpacingEm: CGFloat {
+        max(0, lineHeight - Self.naturalLineHeight(Self.make(chatLatin, cjk: chatCJK, size: chatSize, weight: .regular)))
+    }
+
+    var codeLineSpacingEm: CGFloat {
+        max(0, codeLineHeight - Self.naturalLineHeight(Self.make(codeFont, cjk: nil, size: codeSize, weight: .regular)))
+    }
+
+    /// 某个字号下正文的行距（pt），思考过程这类小一号的正文用。
+    func chatLineSpacing(size: CGFloat) -> CGFloat { chatLineSpacingEm * size }
+
+    /// 字距（pt）。
+    func chatTracking(size: CGFloat) -> CGFloat { tracking * size }
+
+    /// 字体自然行高与字号之比。
+    static func naturalLineHeight(_ font: NSFont) -> CGFloat {
+        let ct = font as CTFont
+        return (CTFontGetAscent(ct) + CTFontGetDescent(ct) + CTFontGetLeading(ct)) / font.pointSize
+    }
 
     /// 字号显示：整数不带小数，半号带一位。
     static func sizeLabel(_ value: Double) -> String {

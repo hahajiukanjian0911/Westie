@@ -13,6 +13,8 @@ struct TranscriptItemView: View {
                 Spacer(minLength: 80)
                 Text(text)
                     .font(typography.chat)
+                    .lineSpacing(typography.chatLineSpacing(size: typography.chatSize))
+                    .tracking(typography.chatTracking(size: typography.chatSize))
                     .textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(palette.bubble, in: .rect(cornerRadius: 10))
@@ -57,7 +59,8 @@ struct ReasoningView: View {
             // 思考过程是正文的旁白：对话字体，小一号、淡一档
             Text(text)
                 .font(typography.chat(size: typography.chatSize - 1))
-                .lineSpacing((typography.chatSize - 1) * 0.25)
+                .lineSpacing(typography.chatLineSpacing(size: typography.chatSize - 1))
+                .tracking(typography.chatTracking(size: typography.chatSize - 1))
                 .foregroundStyle(palette.ink3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
