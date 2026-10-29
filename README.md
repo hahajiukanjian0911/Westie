@@ -43,7 +43,7 @@ node scripts/mock-llm.mjs 3190 &
 open --env WESTIE_MOCK_LLM=3190 temp/DerivedData/Build/Products/Debug/Westie.app
 ```
 
-假模型的暗号：`/bash` 调一次无害的 bash、`/approve` 触发审批、`/ask` 向你提问、`/steps` 连着调五次工具（看过程块）、`/md` 回一段覆盖常见语法的 Markdown，消息以 `slow` 结尾时放慢出字，其余消息原样回显。假模型模式下也可以用 `WESTIE_DSH_HOME` 另指一份测试数据，和已开着的测试实例互不干扰。
+假模型的暗号：`/bash` 调一次无害的 bash、`/approve` 触发审批、`/ask` 向你提问、`/steps` 连着调五次工具（看过程块）、`/think` 慢慢流出一整段多句的思考（看运行中那一行怎么换句）、`/md` 回一段覆盖常见语法的 Markdown，消息以 `slow` 结尾时放慢出字，其余消息原样回显。假模型模式下也可以用 `WESTIE_DSH_HOME` 另指一份测试数据，和已开着的测试实例互不干扰。
 
 ## 测试
 

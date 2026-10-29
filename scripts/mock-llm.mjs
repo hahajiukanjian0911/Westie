@@ -115,7 +115,12 @@ const server = createServer(async (req, res) => {
   let index = 0
   if (body.thinking?.type === 'enabled' || body.thinking?.type === 'adaptive') {
     send('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } })
-    for (const piece of ['先想一想', '……', '好了。']) { send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: piece } }); await pause(60) }
+    // /think：一整段不换行的长思考，几个字一片慢慢流出，用来看运行中那一行怎么换句
+    const long = /^\/think/.test(userText(body).trim())
+    const thought = long
+      ? 'The user wants a quick look at the project. Let me check README.md first. 然后看看 App/Westie 下的视图结构，重点是 ConversationView.swift 和 TranscriptViews.swift。版本 3.5 之后滚动逻辑改过一次！要不要先跑一遍测试？先不跑，读完代码再说。Keep it short.'
+      : '先想一想……好了。'
+    for (const piece of thought.match(long ? /[\s\S]{1,3}/g : /[\s\S]{1,4}/g)) { send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: piece } }); await pause(long ? 90 : 60) }
     send('content_block_delta', { index, delta: { type: 'signature_delta', signature: 'mock' } })
     send('content_block_stop', { index })
     index += 1

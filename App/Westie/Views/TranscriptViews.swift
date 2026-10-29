@@ -60,8 +60,14 @@ struct ProcessView: View {
     @State private var expanded = false
     #endif
     @State private var hovering = false
+    /// 运行中那一行正显示的思考：只放写完的整句，每句至少停留 thoughtDwell。
+    @State private var shownThought = ""
+    @State private var shownThoughtAt = Date.distantPast
+    @State private var thoughtUpdate: Task<Void, Never>?
     @Environment(\.palette) private var palette
     @Environment(\.pauseFollowing) private var pauseFollowing
+
+    private static let thoughtDwell: TimeInterval = 1.5
 
     private var calls: [Transcript.ToolCall] {
         steps.compactMap { if case .tool(let call) = $0 { call } else { nil } }
@@ -82,9 +88,10 @@ struct ProcessView: View {
                     icon
                     label
                         .id(labelKey)
+                        // 整行翻过去：位移等于行高，加上外面的裁切，新旧两句任何一帧都不叠在同一处
                         .transition(.asymmetric(
-                            insertion: .offset(y: 6).combined(with: .opacity),
-                            removal: .offset(y: -6).combined(with: .opacity)
+                            insertion: .offset(y: 24),
+                            removal: .offset(y: -24)
                         ))
                         .lineLimit(1).truncationMode(.tail)
                     Image(systemName: "chevron.right")
@@ -104,8 +111,10 @@ struct ProcessView: View {
             .buttonStyle(.plain)
             .padding(.leading, -6)
             .onHover { hovering = $0 }
-            .animation(.smooth(duration: 0.22), value: labelKey)
+            .animation(.smooth(duration: 0.25), value: labelKey)
             .animation(.easeOut(duration: 0.15), value: hovering)
+            .onChange(of: latestThought, initial: true) { _, sentence in showThought(sentence) }
+            .onDisappear { thoughtUpdate?.cancel() }
             .accessibilityValue(expanded ? "已展开" : "已收起")
 
             Reveal(open: expanded) {
@@ -152,26 +161,55 @@ struct ProcessView: View {
     private var labelKey: String {
         guard active else { return "done" }
         if let call = runningCall { return call.id }
-        // 按第几句换，不按内容：同一句往后长时原地更新，不然每来一个字就淡入淡出一次、叠出重影
-        return "thinking-\(thinkingLineIndex)"
+        return "thinking-\(shownThought)"
     }
 
-    private var thinkingLineIndex: Int {
-        (liveReasoning ?? "").split(whereSeparator: \.isNewline).count { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// 流式思考里最近一句写完的话；正在流出的半句不算。
+    private var latestThought: String {
+        Self.lastCompleteSentence(liveReasoning ?? "") ?? ""
     }
 
-    /// 正在想的那一句：流式思考的最后一行非空文字。
-    private var thinkingLine: String {
-        let text = liveReasoning ?? ""
-        return text.split(whereSeparator: \.isNewline).last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    /// 换句：距上次换句不足 thoughtDwell 就等到期，到期时直接取那时最新的一句，中间的略过。
+    private func showThought(_ sentence: String) {
+        thoughtUpdate?.cancel()
+        guard sentence != shownThought else { return }
+        let wait = Self.thoughtDwell - Date().timeIntervalSince(shownThoughtAt)
+        thoughtUpdate = Task { @MainActor in
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard !Task.isCancelled else { return }
+            shownThought = sentence
+            shownThoughtAt = Date()
+        }
+    }
+
+    /// 按中英文句末标点和换行断句，返回最后一句完整的话。英文句点后面要跟空白才算句末，免得把 a.swift、3.5 拆开。
+    static func lastCompleteSentence(_ text: String) -> String? {
+        var last: String?
+        var start = text.startIndex
+        var index = text.startIndex
+        while index < text.endIndex {
+            let char = text[index]
+            let next = text.index(after: index)
+            let ends: Bool = switch char {
+            case "。", "！", "？", "!", "?", "\n": true
+            case ".": next < text.endIndex && text[next].isWhitespace
+            default: false
+            }
+            if ends {
+                let sentence = text[start..<next].trimmingCharacters(in: .whitespacesAndNewlines)
+                if sentence.count > 1 { last = sentence }
+                start = next
+            }
+            index = next
+        }
+        return last
     }
 
     @ViewBuilder private var label: some View {
         if active, let call = runningCall {
             Text(call.stepText).foregroundStyle(palette.ink2)
         } else if active {
-            Text(thinkingLine.isEmpty ? "思考中…" : thinkingLine)
+            Text(shownThought.isEmpty ? "思考中…" : shownThought)
         } else {
             summary
         }
