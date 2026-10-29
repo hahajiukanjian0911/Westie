@@ -44,6 +44,11 @@ struct ConversationScroll<Content: View>: NSViewRepresentable {
         context.coordinator.hosting?.rootView = content
     }
 
+    static func dismantleNSView(_ scrollView: ConversationScrollView, coordinator: Coordinator) {
+        scrollView.scroller?.detach()
+        coordinator.hosting = nil
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     @MainActor final class Coordinator {
@@ -67,6 +72,14 @@ final class ConversationScrollView: NSScrollView {
     }
 }
 
+/// 一次布局提交的测量。分页按同一存活行的坐标差补偿，不能拿总高度差（其中可能混有尾部流式增长）。
+struct ConversationGeometry: Equatable {
+    var end: CGFloat
+    var firstSeq: Int?
+    var lastUserId: String?
+    var rows: [String: CGFloat]
+}
+
 /// 对话滚动的唯一协调者。设计稿 2026-10-29-chat-scroll v1：
 /// - 内容从上往下排；底部留白（turnSpace）刚好够最后一条用户消息顶到窗口上方 16pt，回复越长留白越小。
 /// - “跟随”就是贴住文档底部：留白还在时底部正是那条消息顶到上方的位置，回复变长、留白缩小，文档总高不变，画面不动；
@@ -85,6 +98,10 @@ final class ConversationScrollView: NSScrollView {
 
     /// 滚动状态变了（偏移、视口、内容）。
     var onMetrics: ((Metrics) -> Void)?
+    /// 空宿主的 offset=0 不能拿来判断是否该翻历史；等当前快照真正排版后再判断。
+    var hasMeasuredHistory: Bool { geometry?.firstSeq != nil }
+
+    func refreshMetrics() { apply() }
 
     private weak var scrollView: ConversationScrollView?
     private weak var document: NSView?
@@ -99,8 +116,10 @@ final class ConversationScrollView: NSScrollView {
     private var pendingUserId: String?
     /// 下一次跟随用动画（发出新消息、点回到底部）。
     private var animateNextFollow = false
-    /// 往前加载了一页，等内容量出新高度时把偏移补上插入的那么多。
-    private var prependBaseline: CGFloat?
+    /// 上一次完整布局，用于识别真正的向前分页并选取仍存在的阅读锚点。
+    private var geometry: ConversationGeometry?
+    /// 页内 Markdown 等可能分多轮才量到最终高度；持续守同一存活行，直到下一次用户意图。
+    private var prependAnchor: (id: String, y: CGFloat)?
     private var animatingTo: CGFloat?
     /// 平滑滚动自己逐帧推进，不交给 NSClipView 的 animator：那样 AppKit 会在帧之间自己改偏移，和这里的放回互相拉扯。
     /// 用定时器而不是 display link：窗口被遮住或隐藏时 display link 停摆，动画收不了尾，跟随就一直卡着。
@@ -111,6 +130,7 @@ final class ConversationScrollView: NSScrollView {
     private var applying = false
 
     func attach(scrollView: ConversationScrollView, document: NSView) {
+        detach()
         self.scrollView = scrollView
         self.document = document
         scrollView.scroller = self
@@ -134,51 +154,73 @@ final class ConversationScrollView: NSScrollView {
     }
 
     isolated deinit {
+        timer?.invalidate()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    func detach() {
+        cancelAnimation()
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers.removeAll()
+        scrollView?.scroller = nil
+        scrollView = nil
+        document = nil
+        onMetrics = nil
     }
 
     // MARK: 来自 SwiftUI 内容的测量
 
-    func contentEndChanged(_ value: CGFloat) {
-        guard value != contentEnd else { return }
+    func layoutChanged(_ value: ConversationGeometry) {
+        let previous = geometry
+        geometry = value
         #if DEBUG
-        trace("content \(contentEnd) -> \(value)")
+        if contentEnd != value.end { trace("content \(contentEnd) -> \(value.end)") }
         #endif
-        let old = contentEnd
-        contentEnd = value
-        if let baseline = prependBaseline, old == baseline {
-            // 往前加载一页：新插入的高度全在上方，偏移补上同样多，正在看的那条留在原处
-            prependBaseline = nil
-            apply(shiftBy: value - old)
-        } else {
-            apply()
-        }
-    }
-
-    func lastUserChanged(id: String, y: CGFloat) {
-        lastUserId = id
-        if pendingUserId == id {
-            pendingUserId = nil
+        contentEnd = value.end
+        lastUserId = value.lastUserId
+        lastUserY = value.lastUserId.flatMap { value.rows[$0] }
+        if let pendingUserId, pendingUserId == lastUserId, lastUserY != nil {
+            self.pendingUserId = nil
             animateNextFollow = true
         }
-        guard y != lastUserY || animateNextFollow else { return }
-        lastUserY = y
-        apply()
+        var shift: CGFloat = 0
+        if let previous, let oldSeq = previous.firstSeq, let newSeq = value.firstSeq, newSeq < oldSeq {
+            // 首条 id 替换不等于分页；只有日志 seq 真正向前，并且锚点仍存在才补偿。
+            // 选离视口顶部最近的存活行，尾部同时增高不会混进这行的坐标差。
+            let offset = scrollView?.contentView.bounds.minY ?? 0
+            if let anchor = previous.rows.filter({ value.rows[$0.key] != nil })
+                .min(by: { abs($0.value - offset) < abs($1.value - offset) }) {
+                prependAnchor = (anchor.key, anchor.value)
+            }
+        }
+        if let anchor = prependAnchor, let y = value.rows[anchor.id] {
+            shift = y - anchor.y
+            prependAnchor = (anchor.id, y)
+            #if DEBUG
+            if shift != 0 { trace("prepend anchor \(anchor.id) y \(anchor.y) -> \(y) shift \(shift)") }
+            #endif
+        } else {
+            prependAnchor = nil
+        }
+        apply(shiftBy: shift)
     }
 
     // MARK: 意图
 
     /// 用户点开或收起：从此原地不动，直到用户滚回底部或发出新消息。
     func hold() {
+        prependAnchor = nil
         following = false
         cancelAnimation()
     }
 
     /// 自己发出新消息：量到这条消息的位置后平滑顶到上方，之后回复长过一屏再跟随。
     func sent(_ id: String) {
+        prependAnchor = nil
         following = true
         cancelAnimation()
         if lastUserId == id {
+            pendingUserId = nil
             // 位置已经先量到了（两边更新先后不定）
             animateNextFollow = true
             apply()
@@ -189,18 +231,16 @@ final class ConversationScrollView: NSScrollView {
 
     /// 回到底部按钮。
     func scrollToEnd() {
+        prependAnchor = nil
+        pendingUserId = nil
         following = true
         animateNextFollow = true
         apply()
     }
 
-    /// 即将往前插入一页历史。
-    func willPrepend() {
-        prependBaseline = contentEnd
-    }
-
     /// 自动化 `scroll:<y>`：模拟用户翻到某处。
     func userScroll(to y: CGFloat) {
+        prependAnchor = nil
         following = false
         cancelAnimation()
         setOffset(y)
@@ -208,6 +248,7 @@ final class ConversationScrollView: NSScrollView {
     }
 
     func userScrollBegan() {
+        prependAnchor = nil
         userScrolling = true
         following = false
         cancelAnimation()
@@ -252,9 +293,17 @@ final class ConversationScrollView: NSScrollView {
         let width = clip.bounds.width
         guard viewport > 0 else { return }
         let base = baseHeight(viewport: viewport)
-        var offset = clip.bounds.minY + shift
-        // 回弹过界时按边界算，不把过界的那截当成要留的空白
-        if userScrolling { offset = min(max(0, offset), document.frame.height - viewport) }
+        var offset = clip.bounds.minY
+        // 先限制旧坐标的回弹，再加分页位移；新插入的高度尚未写入文档，不能用旧范围夹掉补偿。
+        if userScrolling { offset = min(max(0, offset), max(0, document.frame.height - viewport)) }
+        offset = max(0, offset + shift)
+        if shift != 0, var animation {
+            // 分页若撞上有意导航，动画的起终点也平移，下一帧不能退回旧绝对坐标。
+            animation.from += shift
+            animation.to += shift
+            self.animation = animation
+            animatingTo = animation.to
+        }
         var target = offset
         if following, pendingUserId == nil, animatingTo == nil {
             // 跟随只往下走：底部留白还没用完时停在原处
@@ -269,7 +318,7 @@ final class ConversationScrollView: NSScrollView {
         if animateNextFollow, shift == 0, target != offset, !userScrolling {
             setOffset(offset)
             animate(to: target)
-        } else if animatingTo == nil, clip.bounds.minY != target {
+        } else if animatingTo == nil || shift != 0, clip.bounds.minY != target {
             // 改高度时 AppKit 可能顺手挪了偏移，这里明确放回目标，同一轮里完成，画面看不到中间值
             setOffset(target)
         }
@@ -277,6 +326,9 @@ final class ConversationScrollView: NSScrollView {
         if pendingUserId == nil { animateNextFollow = false }
         #if DEBUG
         if clip.bounds.minY != offset - shift { trace("offset -> \(clip.bounds.minY)") }
+        #endif
+        #if DEBUG
+        trace("metrics offset \(clip.bounds.minY) viewport \(viewport) end \(contentEnd) userY \(lastUserY ?? -1) following \(following)")
         #endif
         onMetrics?(Metrics(offset: clip.bounds.minY, viewport: viewport, distanceToEnd: contentEnd - (clip.bounds.minY + viewport)))
     }
@@ -310,9 +362,10 @@ final class ConversationScrollView: NSScrollView {
         let t = animation.duration > 0 ? min(1, (CACurrentMediaTime() - animation.start) / animation.duration) : 1
         // 先快后慢地停下（接近 cubic-bezier(0.2, 0.8, 0.2, 1)）
         let eased = 1 - pow(1 - t, 4)
+        let wasApplying = applying
         applying = true
         setOffset(animation.from + (animation.to - animation.from) * eased)
-        applying = false
+        applying = wasApplying
         #if DEBUG
         if let offset = scrollView?.contentView.bounds.minY { trace("offset -> \(offset)") }
         #endif

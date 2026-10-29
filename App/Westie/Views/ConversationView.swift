@@ -24,7 +24,7 @@ struct ConversationView: View {
 
     /// 翻到离顶部不到 400pt（或内容不满一屏）时往前加载一页。
     private func loadEarlierIfNearTop(offset: CGFloat) {
-        guard revealed, offset < 400, conversation.hasEarlierHistory, !conversation.isLoadingEarlier,
+        guard revealed, scroller.hasMeasuredHistory, offset < 400, conversation.hasEarlierHistory, !conversation.isLoadingEarlier,
               conversation.earlierError == nil else { return }
         loadEarlier()
     }
@@ -60,10 +60,6 @@ struct ConversationView: View {
                 if case .user(let id, _) = conversation.transcript.items.last, revealed {
                     scroller.sent(id)
                 }
-            }
-            .onChange(of: conversation.transcript.items.first?.id) { old, new in
-                // 前面接上了一页：新高度量出来时把偏移补上，原来在看的那条留在原处
-                if old != nil, old != new { scroller.willPrepend() }
             }
             .overlay(alignment: .bottom) {
                 if showsBackToBottom {
@@ -112,7 +108,7 @@ struct ConversationView: View {
                 // 占位条与内容同一帧换掉，不做两层交叉淡变；只给内容一个淡入
                 placeholderShown = false
                 withAnimation(.easeOut(duration: 0.18)) { revealed = true }
-                loadEarlierIfNearTop(offset: 0)
+                scroller.refreshMetrics()
             }
 
             ComposerView(model: model, conversation: conversation, running: running)
@@ -163,32 +159,34 @@ private struct ConversationContent: View {
     }
 
     private var column: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        // 与本次渲染的行身份一同捕获，偏好回调执行时不读取可能已经更新的下一份 transcript。
+        let blocks = displayBlocks
+        let firstSeq = conversation.transcript.firstSeq
+        let measuredLastUserId = lastUserId
+        return VStack(alignment: .leading, spacing: 16) {
             if conversation.hasEarlierHistory {
                 EarlierHistoryRow(conversation: conversation, load: loadEarlier)
             }
-            let blocks = displayBlocks
             let previous = Dictionary(zip(blocks.dropFirst().map(\.id), blocks.map(\.id)), uniquingKeysWith: { first, _ in first })
             ForEach(blocks) { block in
-                switch block {
-                case .item(let item):
-                    TranscriptItemView(item: item)
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { y in
-                            guard item.id == lastUserId else { return }
-                            scroller.lastUserChanged(id: item.id, y: y)
-                        }
-                case .process(let id, let steps):
-                    let trailing = id == blocks.last?.id
-                    let transcript = conversation.transcript
-                    let span = transcript.span(of: steps, after: previous[id])
-                    ProcessView(
-                        steps: steps,
-                        liveReasoning: trailing ? transcript.live?.reasoning : nil,
-                        active: trailing && running && transcript.live?.text.isEmpty != false,
-                        duration: span.map { $0.end.timeIntervalSince($0.start) },
-                        times: transcript.times
-                    )
+                Group {
+                    switch block {
+                    case .item(let item):
+                        TranscriptItemView(item: item)
+                    case .process(let id, let steps):
+                        let trailing = id == blocks.last?.id
+                        let transcript = conversation.transcript
+                        let span = transcript.span(of: steps, after: previous[id])
+                        ProcessView(
+                            steps: steps,
+                            liveReasoning: trailing ? transcript.live?.reasoning : nil,
+                            active: trailing && running && transcript.live?.text.isEmpty != false,
+                            duration: span.map { $0.end.timeIntervalSince($0.start) },
+                            times: transcript.times
+                        )
+                    }
                 }
+                .anchorPreference(key: ConversationRowAnchors.self, value: .bounds) { [block.id: $0] }
             }
             if let live = conversation.transcript.live {
                 LiveMessageView(live: live)
@@ -206,11 +204,30 @@ private struct ConversationContent: View {
                 }
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { scroller.contentEndChanged($0) }
+        .backgroundPreferenceValue(ConversationRowAnchors.self) { anchors in
+            GeometryReader { proxy in
+                let origin = proxy.frame(in: .named(Self.space)).minY
+                let measurement = ConversationGeometry(
+                    end: origin + proxy.size.height,
+                    firstSeq: firstSeq,
+                    lastUserId: measuredLastUserId,
+                    rows: anchors.mapValues { origin + proxy[$0].minY }
+                )
+                Color.clear.onChange(of: measurement, initial: true) { _, value in scroller.layoutChanged(value) }
+            }
+        }
         .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
         .padding(.horizontal, 24)
         .padding(.top, 8)
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ConversationRowAnchors: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] { [:] }
+
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
     }
 }
 
