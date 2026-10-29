@@ -359,11 +359,11 @@ private struct WindowTile: View {
                 .lineLimit(1)
             if !hidden.isEmpty {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .uiFont(9, .semibold)
                     .foregroundStyle(palette.ink3)
             }
         }
-        .font(.system(size: 13, weight: .semibold))
+        .uiFont(13, .semibold)
         .foregroundStyle(focused || onFrame ? palette.ink : palette.ink2)
 
         if hidden.isEmpty {
@@ -582,7 +582,7 @@ struct IconButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13))
+            .uiFont(13)
             .frame(width: 28, height: 28)
             .foregroundStyle(hovering ? palette.ink : palette.ink3)
             .background(hovering || configuration.isPressed ? palette.rowHoverSolid : .clear, in: .rect(cornerRadius: Metrics.rowRadius))
@@ -672,7 +672,7 @@ private struct DragCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .uiFont(12, .semibold)
                 .foregroundStyle(palette.ink)
                 .lineLimit(1)
                 .frame(height: 34)
@@ -800,8 +800,8 @@ private struct AssistCard: View {
     var body: some View {
         Button(action: pick) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(palette.ink).lineLimit(1)
-                Text(detail).font(.system(size: 11)).foregroundStyle(palette.ink3).lineLimit(3)
+                Text(title).uiFont(13, .semibold).foregroundStyle(palette.ink).lineLimit(1)
+                Text(detail).uiFont(11).foregroundStyle(palette.ink3).lineLimit(3)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -828,10 +828,10 @@ private struct EmptyCenterView: View {
     var body: some View {
         VStack(spacing: 12) {
             if model.board.ordered.isEmpty {
-                Text("还没有工作区").font(.system(size: 13, weight: .semibold)).foregroundStyle(palette.ink)
+                Text("还没有工作区").uiFont(13, .semibold).foregroundStyle(palette.ink)
                 Button("打开文件夹…") { SidebarView.chooseFolder(model: model) }
             } else {
-                Text("选择或新建一个会话").font(.system(size: 13)).foregroundStyle(palette.ink3)
+                Text("选择或新建一个会话").uiFont(13).foregroundStyle(palette.ink3)
             }
         }
     }

@@ -74,7 +74,7 @@ private struct WorkspaceHeader: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .uiFont(11, .medium)
                 .foregroundStyle(palette.ink3)
                 .lineLimit(1)
             Spacer()
@@ -101,11 +101,11 @@ private struct SettingsEntry: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 8) {
-                Image(systemName: "gearshape").font(.system(size: 13))
+                Image(systemName: "gearshape").uiFont(13)
                 Text("设置")
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 13))
+            .uiFont(13)
             .foregroundStyle(selected || hovering ? palette.ink : palette.ink2)
             .padding(.horizontal, 8)
             .frame(height: 32)
@@ -149,7 +149,7 @@ private struct SessionRow: View {
                     ProgressView().controlSize(.mini)
                 }
             }
-            .font(.system(size: 13))
+            .uiFont(13)
             .padding(.horizontal, 8)
             .frame(height: 32)
             .background {

@@ -101,7 +101,7 @@ struct ConversationView: View {
                 } else if let error = conversation.followError {
                     ContentUnavailableView("无法打开会话", systemImage: "exclamationmark.triangle", description: Text(error))
                 } else if conversation.transcript.items.isEmpty, conversation.transcript.live == nil, !running {
-                    Text("还没有消息").font(.caption).foregroundStyle(palette.ink4)
+                    Text("还没有消息").uiFont(10).foregroundStyle(palette.ink4)
                 }
             }
             .task {
@@ -138,7 +138,7 @@ private struct EarlierHistoryRow: View {
                     Text("更早的消息加载失败：\(error)").lineLimit(1)
                     Button("重试", action: load).buttonStyle(.link)
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .uiFont(10).foregroundStyle(.secondary)
             } else {
                 Color.clear.frame(height: 1).onAppear(perform: load)
             }

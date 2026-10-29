@@ -15,6 +15,7 @@ import WestieKit
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
 ///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图）
 ///      设置：`settings[:<分页>]`（打开设置卡片并记录读到的值） `theme:<序号>`（换主题） `set:<键>=<值>`（写内核设置后重读）
+///      `font:<项>=<值>`（改字体，项见下方 font 分支）
 ///
 /// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
@@ -188,6 +189,24 @@ enum Automation {
                 }
                 await settings.load()
                 note("after set: model=\(settings.defaultModel.map { "\($0.model)/\($0.effort ?? "-")" } ?? "nil") preset=\(settings.permissionPreset) log=\(settings.sessionLog) depth=\(settings.maxDepth) active=\(settings.maxActive) error=\(settings.error ?? "-")")
+            case "font":
+                // 改字体：uiLatin / uiCJK / chatLatin / chatCJK / code=<名字>，chatSize / codeSize=<字号>
+                let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { note("FAIL font 需要 键=值"); continue }
+                let appearance = model.appearance
+                switch parts[0] {
+                case "uiLatin": appearance.uiLatin = parts[1]
+                case "uiCJK": appearance.uiCJK = parts[1]
+                case "chatLatin": appearance.chatLatin = parts[1]
+                case "chatCJK": appearance.chatCJK = parts[1]
+                case "code": appearance.codeFont = parts[1]
+                case "chatSize": appearance.chatSize = Double(parts[1]) ?? appearance.chatSize
+                case "codeSize": appearance.codeSize = Double(parts[1]) ?? appearance.codeSize
+                default: note("FAIL 未知字体项 \(parts[0])")
+                }
+                let t = appearance.typography
+                note("font ui=\(t.uiLatin.name)/\(t.uiCJK.name) chat=\(t.chatLatin.name)/\(t.chatCJK.name)@\(t.chatSize) code=\(t.codeFont.name)@\(t.codeSize)")
+                try? await Task.sleep(for: .milliseconds(300))
             case "theme":
                 if let index = Int(argument) { model.appearance.themeIndex = index }
                 try? await Task.sleep(for: .milliseconds(300))

@@ -2,7 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Westie 自己的外观：浅深色、主题、颗粒质感。只存在 UserDefaults，不写 `~/.dsh`。
+/// Westie 自己的外观：浅深色、主题、颗粒质感、字体。只存在 UserDefaults，不写 `~/.dsh`。
 /// 主题沿用外观设置 v2 的六个预设（`deliverables/Westie/reviews/2026-10-27-appearance-settings/v2/source/themes.js`）。
 @MainActor @Observable
 final class AppearanceSettings {
@@ -44,6 +44,26 @@ final class AppearanceSettings {
     var mode: Mode { didSet { save(); apply() } }
     var themeIndex: Int { didSet { save() } }
     var grain: Bool { didSet { save() } }
+    /// 字体：存的是推荐列表里的名字，找不到就回到列表第一款（系统字体）。
+    var uiLatin: String { didSet { save() } }
+    var uiCJK: String { didSet { save() } }
+    var chatLatin: String { didSet { save() } }
+    var chatCJK: String { didSet { save() } }
+    var chatSize: Double { didSet { save() } }
+    var codeFont: String { didSet { save() } }
+    var codeSize: Double { didSet { save() } }
+
+    var typography: Typography {
+        Typography(
+            uiLatin: FontOption.find(uiLatin, in: FontOption.uiLatin),
+            uiCJK: FontOption.find(uiCJK, in: FontOption.uiCJK),
+            chatLatin: FontOption.find(chatLatin, in: FontOption.chatLatin),
+            chatCJK: FontOption.find(chatCJK, in: FontOption.chatCJK),
+            chatSize: chatSize,
+            codeFont: FontOption.find(codeFont, in: FontOption.code),
+            codeSize: codeSize
+        )
+    }
 
     var theme: Theme { Self.themes[min(max(themeIndex, 0), Self.themes.count - 1)] }
 
@@ -64,6 +84,14 @@ final class AppearanceSettings {
         mode = (saved["mode"] as? String).flatMap(Mode.init) ?? .system
         themeIndex = saved["theme"] as? Int ?? 0
         grain = saved["grain"] as? Bool ?? true
+        let fonts = saved["fonts"] as? [String: Any] ?? [:]
+        uiLatin = fonts["uiLatin"] as? String ?? FontOption.uiLatin[0].name
+        uiCJK = fonts["uiCJK"] as? String ?? FontOption.uiCJK[0].name
+        chatLatin = fonts["chatLatin"] as? String ?? FontOption.chatLatin[0].name
+        chatCJK = fonts["chatCJK"] as? String ?? FontOption.chatCJK[0].name
+        chatSize = fonts["chatSize"] as? Double ?? 14
+        codeFont = fonts["code"] as? String ?? FontOption.code[0].name
+        codeSize = fonts["codeSize"] as? Double ?? 12.5
     }
 
     /// 浅深色落在 App 级 appearance 上（菜单、弹层一起变），不动系统设置。
@@ -76,6 +104,10 @@ final class AppearanceSettings {
     }
 
     private func save() {
-        defaults.set(["mode": mode.rawValue, "theme": themeIndex, "grain": grain], forKey: Self.key)
+        let fonts: [String: Any] = [
+            "uiLatin": uiLatin, "uiCJK": uiCJK, "chatLatin": chatLatin, "chatCJK": chatCJK,
+            "chatSize": chatSize, "code": codeFont, "codeSize": codeSize,
+        ]
+        defaults.set(["mode": mode.rawValue, "theme": themeIndex, "grain": grain, "fonts": fonts], forKey: Self.key)
     }
 }

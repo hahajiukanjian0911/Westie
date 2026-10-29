@@ -35,6 +35,8 @@ struct RootView: View {
         }
         .overlay(alignment: .top) { errorBanner }
         .environment(\.palette, palette)
+        .environment(\.typography, model.appearance.typography)
+        .font(model.appearance.typography.ui(13))
         .foregroundStyle(palette.ink)
         .tint(palette.accent)
         .navigationTitle(layout.focusedSessionId.flatMap { model.sessions[$0]?.displayTitle } ?? "Westie")
@@ -63,7 +65,7 @@ struct RootView: View {
             VStack(spacing: 10) {
                 AppLogo(size: 72)
                 Text("Westie")
-                    .font(.system(size: 15, weight: .semibold))
+                    .uiFont(15, .semibold)
                     .tracking(0.3)
                     .foregroundStyle(palette.ink3)
             }

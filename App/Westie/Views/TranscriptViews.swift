@@ -4,6 +4,7 @@ import WestieKit
 struct TranscriptItemView: View {
     let item: Transcript.Item
     @Environment(\.palette) private var palette
+    @Environment(\.typography) private var typography
 
     var body: some View {
         switch item {
@@ -11,6 +12,7 @@ struct TranscriptItemView: View {
             HStack {
                 Spacer(minLength: 80)
                 Text(text)
+                    .font(typography.chat)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(palette.bubble, in: .rect(cornerRadius: 10))
@@ -23,7 +25,7 @@ struct TranscriptItemView: View {
             ToolCallView(call: call)
         case .notice(_, let text):
             Label(text, systemImage: "info.circle")
-                .font(.callout).foregroundStyle(palette.ink3)
+                .uiFont(12).foregroundStyle(palette.ink3)
         }
     }
 }
@@ -52,13 +54,13 @@ struct ReasoningView: View {
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             Text(text)
-                .font(.callout).foregroundStyle(palette.ink3)
+                .uiFont(12).foregroundStyle(palette.ink3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
         } label: {
             Text(streaming ? "思考中…" : "思考过程")
-                .font(.callout).foregroundStyle(palette.ink3)
+                .uiFont(12).foregroundStyle(palette.ink3)
         }
     }
 }
@@ -67,13 +69,14 @@ struct ToolCallView: View {
     let call: Transcript.ToolCall
     @State private var expanded = false
     @Environment(\.palette) private var palette
+    @Environment(\.typography) private var typography
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             if let result = call.result, !result.isEmpty {
                 ScrollView {
                     Text(result)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(typography.codeFont(size: 11))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -89,8 +92,8 @@ struct ToolCallView: View {
                     Image(systemName: call.isError ? "xmark.circle" : "checkmark.circle")
                         .foregroundStyle(call.isError ? palette.bad : palette.ink3)
                 }
-                Text(call.name).font(.system(.callout, design: .monospaced)).foregroundStyle(palette.ink2)
-                Text(call.summary).font(.callout).foregroundStyle(palette.ink3).lineLimit(1)
+                Text(call.name).font(typography.codeFont(size: 12)).foregroundStyle(palette.ink2)
+                Text(call.summary).uiFont(12).foregroundStyle(palette.ink3).lineLimit(1)
             }
         }
     }

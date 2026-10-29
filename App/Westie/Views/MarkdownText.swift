@@ -9,6 +9,7 @@ struct MarkdownText: View {
     var streaming = false
     @State private var parser = StreamingMarkdownParser()
     @Environment(\.palette) private var palette
+    @Environment(\.typography) private var typography
 
     var body: some View {
         Group {
@@ -29,12 +30,12 @@ struct MarkdownText: View {
 
     private func styled(_ content: StructuredText) -> some View {
         content
-            .font(.system(size: MarkdownMetrics.body))
+            .font(typography.chat)
             .foregroundStyle(palette.ink2)
             .textual.textSelection(.enabled)
             .textual.inlineStyle(
                 InlineStyle()
-                    .code(.monospaced, .fontScale(MarkdownMetrics.codeScale),
+                    .code(.font(typography.code),
                           .foregroundColor(DynamicColor(palette.ink)), .backgroundColor(DynamicColor(palette.bubble)))
                     .strong(.fontWeight(.semibold), .foregroundColor(DynamicColor(palette.ink)))
                     .link(.foregroundColor(DynamicColor(palette.ink)),
@@ -75,9 +76,8 @@ struct MarkdownText: View {
 
 /// 排版数值照抄设计稿 v1 的 CSS（`.new .md`）。
 enum MarkdownMetrics {
+    /// 正文的基准字号；实际字号取外观设置里的对话字号，标题按与它的比例缩放。
     static let body: CGFloat = 14
-    /// 行内代码和代码块 12.5pt。
-    static let codeScale: CGFloat = 12.5 / 14
     /// 中文正文行高约 1.75 倍：系统字体自然行高之外再加的行距（按 14pt 折算）。
     static let bodyLineSpacing: CGFloat = 0.5
     static let halfLeading: CGFloat = 3.5
@@ -219,6 +219,7 @@ private struct CodeCardStyle: StructuredText.CodeBlockStyle {
 private struct CodeCard: View {
     let configuration: StructuredText.CodeBlockStyleConfiguration
     let palette: Palette
+    @Environment(\.typography) private var typography
     @State private var hovering = false
     @State private var copied = false
 
@@ -226,7 +227,7 @@ private struct CodeCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(configuration.languageHint ?? "")
-                    .font(.system(size: 11)).tracking(0.2)
+                    .uiFont(11).tracking(0.2)
                     .foregroundStyle(palette.ink4)
                 Spacer()
                 Button {
@@ -238,7 +239,7 @@ private struct CodeCard: View {
                     }
                 } label: {
                     Label(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 11))
+                        .uiFont(11)
                         .labelStyle(.titleAndIcon)
                         .padding(.horizontal, 7).frame(height: 22)
                         .contentShape(.rect)
@@ -253,9 +254,8 @@ private struct CodeCard: View {
             Overflow {
                 configuration.label
                     .textual.lineSpacing(.fontScaled(0.4))
-                    .textual.fontScale(MarkdownMetrics.codeScale)
+                    .font(typography.code)
                     .fixedSize(horizontal: false, vertical: true)
-                    .monospaced()
                     .padding(.horizontal, 16).padding(.bottom, 14)
             }
         }

@@ -9,11 +9,13 @@ struct ComposerView: View {
     @State private var draft = ""
     @FocusState private var focused: Bool
     @Environment(\.palette) private var palette
+    @Environment(\.typography) private var typography
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("给 Agent 发消息", text: $draft, prompt: Text("给 Agent 发消息").foregroundStyle(palette.ink4), axis: .vertical)
                 .textFieldStyle(.plain)
+                .font(typography.chat)
                 .lineLimit(1...10)
                 .focused($focused)
                 .onKeyPress(.return, phases: .down) { press in
@@ -76,7 +78,7 @@ private struct ModelMenu: View {
                 if let effort = current.effort { Text("· \(effort)").foregroundStyle(.secondary) }
                 Image(systemName: "chevron.down").imageScale(.small)
             }
-            .font(.callout)
+            .uiFont(12)
         }
         .buttonStyle(.borderless)
         .disabled(model.models.isEmpty)
@@ -112,7 +114,7 @@ private struct ModelPicker: View {
             if let efforts = choice?.efforts, efforts.count > 1 {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("思考：\(efforts[min(Int(effortIndex), efforts.count - 1)])")
-                        .font(.callout)
+                        .uiFont(12)
                     Slider(value: $effortIndex, in: 0...Double(efforts.count - 1), step: 1)
                 }
             }
@@ -141,7 +143,7 @@ private struct SendButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
+            .uiFont(13, .semibold)
             .foregroundStyle(palette.onAccent)
             .frame(width: 28, height: 28)
             .background(palette.accent, in: .circle)

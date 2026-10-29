@@ -7,7 +7,7 @@ struct ApprovalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("需要你的允许：\(approval.toolName)", systemImage: "hand.raised")
-                .font(.headline)
+                .uiFont(13, .semibold)
             Text(approval.reason)
                 .textSelection(.enabled)
                 .foregroundStyle(.secondary)
@@ -40,15 +40,15 @@ struct QuestionCard: View {
             ForEach(question.items) { item in
                 VStack(alignment: .leading, spacing: 8) {
                     if let header = item.header {
-                        Text(header).font(.caption).foregroundStyle(.secondary)
+                        Text(header).uiFont(10).foregroundStyle(.secondary)
                     }
-                    Text(item.question).font(.headline)
+                    Text(item.question).uiFont(13, .semibold)
                     ForEach(item.options, id: \.label) { option in
                         Toggle(isOn: binding(item, option.label)) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(option.label)
                                 if let description = option.description {
-                                    Text(description).font(.caption).foregroundStyle(.secondary)
+                                    Text(description).uiFont(10).foregroundStyle(.secondary)
                                 }
                             }
                         }
