@@ -95,3 +95,28 @@ private func fixture(_ name: String) throws -> (follow: [JSONValue], workspace: 
     paged.prepend(pageRecords: events[..<resultIndex].map { ["type": "event", "event": $0] })
     #expect(paged.items == full.items)
 }
+
+@Test func groupsProcessBetweenReplies() throws {
+    var transcript = Transcript()
+    for frame in try fixture("bash").follow { transcript.apply(followFrame: frame) }
+    let shape = transcript.blocks.map { block -> String in
+        switch block {
+        case .item(let item): if case .user = item { "user" } else { "reply" }
+        case .process(_, let steps): "process(\(steps.count))"
+        }
+    }
+    #expect(shape == ["user", "process(1)", "reply", "process(2)", "reply"])
+    #expect(Set(transcript.blocks.map(\.id)).count == transcript.blocks.count)
+}
+
+@Test func classifiesTools() {
+    func call(_ name: String, _ arguments: JSONValue = .null) -> Transcript.ToolCall {
+        Transcript.ToolCall(id: name, name: name, arguments: arguments)
+    }
+    #expect(call("read").kind == .read)
+    #expect(call("str_replace_editor").kind == .edit)
+    #expect(call("terminal_send").kind == .run)
+    #expect(call("glob").kind == .search)
+    #expect(call("todo_write").kind == .other)
+    #expect(call("read", .object(["file_path": .string("/Users/a/Development/README.md")])).stepText == "Development/README.md")
+}

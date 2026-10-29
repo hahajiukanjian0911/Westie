@@ -29,6 +29,19 @@ struct ConversationView: View {
         }
     }
 
+    /// 流式中的思考要归进最后一个过程块；前面没有过程块时先补一个空的，落盘后 id 不变。
+    private var displayBlocks: [Transcript.Block] {
+        var blocks = conversation.transcript.blocks
+        if let live = conversation.transcript.live, !live.reasoning.isEmpty, !endsWithProcess(blocks) {
+            blocks.append(.process(id: Transcript.processId(after: blocks.last), steps: []))
+        }
+        return blocks
+    }
+
+    private func endsWithProcess(_ blocks: [Transcript.Block]) -> Bool {
+        if case .process = blocks.last { true } else { false }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -36,12 +49,23 @@ struct ConversationView: View {
                     if conversation.hasEarlierHistory {
                         EarlierHistoryRow(conversation: conversation, load: loadEarlier)
                     }
-                    ForEach(conversation.transcript.items) { item in
-                        TranscriptItemView(item: item)
+                    let blocks = displayBlocks
+                    ForEach(blocks) { block in
+                        switch block {
+                        case .item(let item):
+                            TranscriptItemView(item: item)
+                        case .process(let id, let steps):
+                            let trailing = id == blocks.last?.id
+                            ProcessView(
+                                steps: steps,
+                                liveReasoning: trailing ? conversation.transcript.live?.reasoning : nil,
+                                active: trailing && running && conversation.transcript.live?.text.isEmpty != false
+                            )
+                        }
                     }
                     if let live = conversation.transcript.live {
                         LiveMessageView(live: live)
-                    } else if running, approvals.isEmpty, questions.isEmpty {
+                    } else if running, approvals.isEmpty, questions.isEmpty, !endsWithProcess(blocks) {
                         ProgressView().controlSize(.small).padding(.leading, 2)
                     }
                     ForEach(approvals) { approval in

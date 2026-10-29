@@ -23,6 +23,15 @@ const TOOL_SCRIPTS = {
   },
 }
 
+// `/steps`：连着调几次无害工具（中间一条故意失败），用来看过程块的收起、运行中和失败。
+const STEPS = [
+  { name: 'read', input: { file_path: 'README.md' } },
+  { name: 'bash', input: { description: '列出当前目录', command: 'ls' } },
+  { name: 'grep', input: { pattern: 'westie', path: '.' } },
+  { name: 'bash', input: { description: '读取不存在的文件', command: 'cat westie-mock-missing-file' } },
+  { name: 'bash', input: { description: '查看最近的提交', command: 'echo westie-mock-log' } },
+]
+
 // `/md`：覆盖常见 Markdown 语法，用来核对渲染。
 const MARKDOWN_SAMPLE = [
   '## 二级标题',
@@ -63,11 +72,19 @@ const MARKDOWN_SAMPLE = [
 const plan = (body) => {
   // 辅助请求（会话标题）：短答复。
   if ((body.max_tokens ?? 0) <= 200 || !body.tools) return { text: '模拟会话' }
-  // 上一步是工具结果：收尾。
-  if (blocks(lastUser(body)).some((b) => b.type === 'tool_result')) return { text: '工具调用完成，这是假模型的收尾回复。' }
+  // 上一步是工具结果：/steps 还没调完就接着调，否则收尾。
+  if (blocks(lastUser(body)).some((b) => b.type === 'tool_result')) {
+    const cue = [...body.messages].reverse().find((m) => m.role === 'user' && blocks(m).some((b) => b.type === 'text' && b.text.trim().startsWith('/')))
+    if (blocks(cue).find((b) => b.type === 'text')?.text.trim().startsWith('/steps')) {
+      const done = body.messages.flatMap(blocks).filter((b) => b.type === 'tool_result').length
+      if (done < STEPS.length) return { text: '', tool: STEPS[done] }
+    }
+    return { text: '工具调用完成，这是假模型的收尾回复。' }
+  }
   const text = userText(body)
   const script = Object.entries(TOOL_SCRIPTS).find(([cue]) => text.startsWith(cue))?.[1]
   if (script) return { text: '我来调用一个工具。', tool: script }
+  if (text.startsWith('/steps')) return { text: '', tool: STEPS[0] }
   if (text.startsWith('/md')) return { text: MARKDOWN_SAMPLE }
   return { text: `这是来自本地假模型的回复。\n\n你说的是：「${text.slice(0, 200)}」\n\n- 第一点\n- 第二点\n\n\`\`\`swift\nprint("hello westie")\n\`\`\`` }
 }
@@ -103,13 +120,15 @@ const server = createServer(async (req, res) => {
     send('content_block_stop', { index })
     index += 1
   }
-  send('content_block_start', { index, content_block: { type: 'text', text: '' } })
-  // 消息末尾带 slow 时放慢到约 1/5 速度，方便看流式出字
-  const step = /slow\s*$/.test(userText(body)) ? 120 : 25
-  for (const piece of text.match(/[\s\S]{1,6}/g)) { send('content_block_delta', { index, delta: { type: 'text_delta', text: piece } }); await pause(step) }
-  send('content_block_stop', { index })
-  if (tool) {
+  if (text) {
+    send('content_block_start', { index, content_block: { type: 'text', text: '' } })
+    // 消息末尾带 slow 时放慢到约 1/5 速度，方便看流式出字
+    const step = /slow\s*$/.test(userText(body)) ? 120 : 25
+    for (const piece of text.match(/[\s\S]{1,6}/g)) { send('content_block_delta', { index, delta: { type: 'text_delta', text: piece } }); await pause(step) }
+    send('content_block_stop', { index })
     index += 1
+  }
+  if (tool) {
     send('content_block_start', { index, content_block: { type: 'tool_use', id: `toolu_mock_${Date.now()}`, name: tool.name, input: {} } })
     send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(tool.input) } })
     send('content_block_stop', { index })
