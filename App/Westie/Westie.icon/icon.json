@@ -1,0 +1,88 @@
+{
+  "groups": [
+    {
+      "name": "02-Eyes-Nose",
+      "layers": [
+        {
+          "name": "02-Eyes-Nose",
+          "image-name": "02-Eyes-Nose.svg",
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          },
+          "glass": false
+        }
+      ],
+      "specular": false,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      },
+      "blur-material": 0
+    },
+    {
+      "name": "01-Dog-Body",
+      "layers": [
+        {
+          "name": "01-Dog-Body",
+          "image-name": "01-Dog-Body.svg",
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          },
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.98431373,0.97647059,0.94901961,1.00000000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.98431373,0.97647059,0.94901961,1.00000000"
+              }
+            }
+          ]
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      },
+      "blur-material": 0.5
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  },
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:0.43137255,0.54901961,0.71764706,1.00000000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.43137255,0.54901961,0.71764706,1.00000000"
+      }
+    }
+  ]
+}

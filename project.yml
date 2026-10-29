@@ -32,6 +32,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hahajiukanjian.westie
+        # 图标：deliverables/AgentDock/reviews/2026-10-20-app-logo v13 定稿（Icon Composer 分层玻璃图标）
+        ASSETCATALOG_COMPILER_APPICON_NAME: Westie
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"
