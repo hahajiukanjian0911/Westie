@@ -308,5 +308,7 @@ extension EnvironmentValues {
 extension Notification.Name {
     /// 自动化 `process`：像点了一下那样切换所有过程块的展开。
     static let westieToggleProcess = Notification.Name("westieToggleProcess")
+    /// 自动化 `scroll:<y>`：对话滚到指定偏移，像用户翻到那里。
+    static let westieScrollTo = Notification.Name("westieScrollTo")
 }
 #endif

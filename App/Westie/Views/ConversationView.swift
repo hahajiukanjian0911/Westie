@@ -10,6 +10,7 @@ struct ConversationView: View {
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var atBottom = true
+    @State private var offsetY: CGFloat = 0
     /// 原地等候（设计稿 2026-10-29-loading v1 方向 A）：200ms 还没到才出占位条；到了只淡入内容。
     @State private var placeholderShown = false
     @State private var revealed = false
@@ -112,7 +113,21 @@ struct ConversationView: View {
                     scrollPosition.scrollTo(edge: .bottom)
                 }
             }
-            .environment(\.pauseFollowing) { following = false }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, value in
+                offsetY = value
+            }
+            #if DEBUG
+            .onReceive(NotificationCenter.default.publisher(for: .westieScrollTo)) { note in
+                // 自动化 `scroll:<y>`：模拟用户翻到某处
+                following = false
+                scrollPosition.scrollTo(y: note.object as? CGFloat ?? 0)
+            }
+            #endif
+            .environment(\.pauseFollowing) {
+                // 位置原本钉在“底部”时，内容变高会把上面的内容往上推；改钉在当前偏移，展开的东西往下长
+                following = false
+                scrollPosition.scrollTo(y: offsetY)
+            }
             .onChange(of: conversation.transcript.items.last?.id) {
                 // 自己发出新消息时回到跟随。看末条换没换，不看条数：往前翻页只在前面加，末条不变
                 if case .user = conversation.transcript.items.last { following = true }
