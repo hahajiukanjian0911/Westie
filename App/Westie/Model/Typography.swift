@@ -100,7 +100,9 @@ struct Typography: Equatable, Sendable {
         Font(Self.make(uiLatin, cjk: uiCJK, size: size, weight: weight))
     }
 
-    var chat: Font { Font(Self.make(chatLatin, cjk: chatCJK, size: chatSize, weight: .regular)) }
+    var chat: Font { chat(size: chatSize) }
+
+    func chat(size: CGFloat) -> Font { Font(Self.make(chatLatin, cjk: chatCJK, size: size, weight: .regular)) }
 
     var code: Font { codeFont(size: codeSize) }
 

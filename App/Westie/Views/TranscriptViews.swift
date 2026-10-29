@@ -50,11 +50,15 @@ struct ReasoningView: View {
     let streaming: Bool
     @State private var expanded = false
     @Environment(\.palette) private var palette
+    @Environment(\.typography) private var typography
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
+            // 思考过程是正文的旁白：对话字体，小一号、淡一档
             Text(text)
-                .uiFont(12).foregroundStyle(palette.ink3)
+                .font(typography.chat(size: typography.chatSize - 1))
+                .lineSpacing((typography.chatSize - 1) * 0.25)
+                .foregroundStyle(palette.ink3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
@@ -76,7 +80,7 @@ struct ToolCallView: View {
             if let result = call.result, !result.isEmpty {
                 ScrollView {
                     Text(result)
-                        .font(typography.codeFont(size: 11))
+                        .font(typography.codeFont(size: typography.codeSize - 1))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -92,8 +96,8 @@ struct ToolCallView: View {
                     Image(systemName: call.isError ? "xmark.circle" : "checkmark.circle")
                         .foregroundStyle(call.isError ? palette.bad : palette.ink3)
                 }
-                Text(call.name).font(typography.codeFont(size: 12)).foregroundStyle(palette.ink2)
-                Text(call.summary).uiFont(12).foregroundStyle(palette.ink3).lineLimit(1)
+                Text(call.name).font(typography.code).foregroundStyle(palette.ink2)
+                Text(call.summary).font(typography.code).foregroundStyle(palette.ink3).lineLimit(1).truncationMode(.middle)
             }
         }
     }
