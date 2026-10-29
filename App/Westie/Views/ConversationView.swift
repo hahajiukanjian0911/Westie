@@ -39,6 +39,13 @@ struct ConversationView: View {
         return blocks
     }
 
+    /// 翻到离顶部不到 400pt（或内容不满一屏）时往前加载一页。
+    private func loadEarlierIfNearTop() {
+        guard revealed, offsetY < 400, conversation.hasEarlierHistory, !conversation.isLoadingEarlier,
+              conversation.earlierError == nil else { return }
+        loadEarlier()
+    }
+
     private func endsWithProcess(_ blocks: [Transcript.Block]) -> Bool {
         if case .process = blocks.last { true } else { false }
     }
@@ -46,7 +53,7 @@ struct ConversationView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
                     if conversation.hasEarlierHistory {
                         EarlierHistoryRow(conversation: conversation, load: loadEarlier)
                     }
@@ -110,6 +117,7 @@ struct ConversationView: View {
                 }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
+                loadEarlierIfNearTop()
                 guard following, new > old else { return }
                 // 回复生成中平滑跟上；空闲时（打开会话后逐段量出真实高度等）直接贴住底部，不出现滚动
                 if running {
@@ -118,9 +126,18 @@ struct ConversationView: View {
                     scrollPosition.scrollTo(edge: .bottom)
                 }
             }
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, value in
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, value in
                 offsetY = value
+                loadEarlierIfNearTop()
+                #if DEBUG
+                trace("offset \(old) -> \(value)")
+                #endif
             }
+            #if DEBUG
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, value in
+                trace("content \(old) -> \(value)")
+            }
+            #endif
             #if DEBUG
             .onReceive(NotificationCenter.default.publisher(for: .westieScrollTo)) { note in
                 // 自动化 `scroll:<y>`：模拟用户翻到某处
@@ -164,6 +181,7 @@ struct ConversationView: View {
                 // 占位条与内容同一帧换掉，不做两层交叉淡变；只给内容一个淡入
                 placeholderShown = false
                 withAnimation(.easeOut(duration: 0.18)) { revealed = true }
+                loadEarlierIfNearTop()
             }
 
             ComposerView(model: model, conversation: conversation, running: running)
@@ -191,7 +209,8 @@ private struct EarlierHistoryRow: View {
                 }
                 .uiFont(10).foregroundStyle(.secondary)
             } else {
-                Color.clear.frame(height: 1).onAppear(perform: load)
+                // 何时加载由 ConversationView 按滚动位置决定：VStack 里的行一创建就会 onAppear
+                Color.clear.frame(height: 1)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 20)

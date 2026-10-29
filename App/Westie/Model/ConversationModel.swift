@@ -33,7 +33,8 @@ final class ConversationModel {
             let stream = await connection.stream("session/follow", ["request": [
                 "address": ["kind": "session", "sessionId": .string(sessionId)],
                 "assistantStream": true,
-                "maxMessages": .number(200),
+                // 对话列表是一次排完的 VStack（展开不抖），首屏只取最近一段，往上翻再分页
+                "maxMessages": .number(60),
             ]])
             do {
                 for try await frame in stream {
@@ -55,7 +56,7 @@ final class ConversationModel {
         }
     }
 
-    /// 往前加载一页历史（与 DSH 网页版同样的分页参数：至少 50 条消息、跨过 2 个回合，最多 500 条）。
+    /// 往前加载一页历史（至少 50 条消息、跨过 2 个回合，最多 120 条）。
     /// 已有请求在途时等它结束并返回它的结果，不另发请求。返回是否真的接上了更早的记录。
     @discardableResult
     func loadEarlier() async -> Bool {
@@ -78,7 +79,7 @@ final class ConversationModel {
                 "address": ["kind": "session", "sessionId": .string(sessionId)],
                 "throughSeq": .number(Double(throughSeq)),
                 "beforeSeq": .number(Double(beforeSeq)),
-                "maxMessages": .number(500),
+                "maxMessages": .number(120),
                 "turnWindow": ["minMessages": .number(50), "minTurns": .number(2)],
             ]])
             transcript.prepend(pageRecords: page["records"]?.arrayValue ?? [])

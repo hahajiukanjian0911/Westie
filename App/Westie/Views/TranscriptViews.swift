@@ -122,9 +122,14 @@ struct ProcessView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         #if DEBUG
-        .onReceive(NotificationCenter.default.publisher(for: .westieToggleProcess)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .westieToggleProcess)) { note in
+            guard note.object == nil || note.object as? String == steps.first?.id else { return }
+            trace("toggle process \(steps.first?.id ?? "")")
             pauseFollowing()
             withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { old, new in
+            trace("process \(steps.first?.id ?? "") minY \(old) -> \(new)")
         }
         #endif
     }
@@ -272,6 +277,14 @@ private struct ProcessStepRow: View {
 
             Reveal(open: open) { detail }
         }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: .westieToggleStep)) { note in
+            guard note.object as? String == step.id else { return }
+            trace("toggle step \(step.id)")
+            pauseFollowing()
+            withAnimation(.smooth(duration: 0.22)) { open.toggle() }
+        }
+        #endif
     }
 
     private var call: Transcript.ToolCall? {
@@ -378,5 +391,17 @@ extension Notification.Name {
     static let westieToggleProcess = Notification.Name("westieToggleProcess")
     /// 自动化 `scroll:<y>`：对话滚到指定偏移，像用户翻到那里。
     static let westieScrollTo = Notification.Name("westieScrollTo")
+    static let westieToggleStep = Notification.Name("westieToggleStep")
+}
+
+/// 排查布局跳动：WESTIE_TRACE=<文件> 时逐行记下位置变化。
+func trace(_ line: @autoclosure () -> String) {
+    guard let path = ProcessInfo.processInfo.environment["WESTIE_TRACE"] else { return }
+    let data = Data("\(String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000))) \(line())\n".utf8)
+    if let handle = FileHandle(forWritingAtPath: path) {
+        handle.seekToEndOfFile(); handle.write(data); try? handle.close()
+    } else {
+        FileManager.default.createFile(atPath: path, contents: data)
+    }
 }
 #endif

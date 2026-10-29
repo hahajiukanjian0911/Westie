@@ -9,7 +9,7 @@ import WestieKit
 ///
 /// 步骤：`workspace:<路径>` `new` `prompt:<文本>` `wait:<秒>` `idle`（等回合结束）
 ///      `approve` `reject` `answer:<选项>` `select:<序号或会话 id>` `earlier[:<页数>]`（往前翻页） `shot:<png 路径>` `dump` `quit`
-///      `process`（像点了一下那样切换所有过程块的展开） `scroll:<y>`（对话滚到指定偏移）
+///      `process[:k]` `step:k.i`（像点了一下那样切换第 k 个过程块或其中第 i 步） `scroll:<y>`（对话滚到指定偏移）
 ///      面板：`split:<序号>`（并排打开第 n 个会话） `move:<面板>`（聚焦窗口移到 top/primary/center/secondary/bottom）
 ///      `toggle:<面板>` `hide`（收起聚焦窗口） `appearance:dark|light`（只改 App 外观） `layout`（记录各面板的窗口）
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
@@ -104,6 +104,7 @@ enum Automation {
                     note("panel \(panel.rawValue) visible=\(layout.isVisible(panel)) shown=[\(shown.joined(separator: ", "))] hidden=[\(hidden.joined(separator: ", "))]")
                 }
             case "select":
+                trace("select \(argument)")
                 await until { !model.board.ordered.isEmpty }
                 let all = model.board.ordered.flatMap { model.sessions(in: $0) }
                 // 序号或会话 id
@@ -158,8 +159,20 @@ enum Automation {
                 }
             case "scroll":
                 NotificationCenter.default.post(name: .westieScrollTo, object: CGFloat(Double(argument) ?? 0))
-            case "process":
-                NotificationCenter.default.post(name: .westieToggleProcess, object: nil)
+            case "process", "step":
+                // process[:k] 切换第 k 个过程块（从 0 数，省略为全部）；step:k.i 切换第 k 个过程块的第 i 步
+                let processes = (model.conversation?.transcript.blocks ?? []).compactMap { block -> [Transcript.Item]? in
+                    if case .process(_, let steps) = block { steps } else { nil }
+                }
+                let parts = argument.split(separator: ".").compactMap { Int($0) }
+                if verb == "process" {
+                    let id = parts.first.flatMap { processes.indices.contains($0) ? processes[$0].first?.id : nil }
+                    NotificationCenter.default.post(name: .westieToggleProcess, object: id)
+                } else if parts.count == 2, processes.indices.contains(parts[0]), processes[parts[0]].indices.contains(parts[1]) {
+                    NotificationCenter.default.post(name: .westieToggleStep, object: processes[parts[0]][parts[1]].id)
+                } else {
+                    note("FAIL step \(argument)")
+                }
             case "shot":
                 try? await Task.sleep(for: .milliseconds(400))
                 note(snapshot(to: URL(filePath: argument)) ? "shot \(argument)" : "FAIL shot \(argument)")
