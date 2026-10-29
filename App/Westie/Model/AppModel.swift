@@ -62,6 +62,8 @@ final class AppModel {
     private(set) var defaultModel: ModelChoice?
     /// 正在显示的会话（由面板布局告知），每个跟读一条 `session/follow`。
     private(set) var conversations: [String: ConversationModel] = [:]
+    /// ⌘N 的新建会话面板是否打开。
+    var showingNewSession = false
     /// 当前聚焦的会话：侧栏高亮、新建会话后跳转都通过它与面板布局同步。
     var selectedSessionId: String?
     /// 聚焦会话的对话（自动化脚本用）。
@@ -162,6 +164,7 @@ final class AppModel {
     /// 退出前：停掉长连任务并交出连接与内核，由调用方在主 actor 之外结束它们。
     func prepareShutdown() -> (connection: KernelConnection?, kernel: KernelProcess?) {
         phase = .failed("正在退出")
+        autoArchiveTask?.cancel()
         connectionTasks.forEach { $0.cancel() }
         connectionTasks = []
         conversations.values.forEach { $0.close() }
@@ -191,6 +194,7 @@ final class AppModel {
         try await refreshSessions()
         try await loadModels()
         phase = .ready
+        startAutoArchive()
         Task { await settings.load() }
         conversations.values.forEach { $0.close() }
         conversations = [:]
@@ -246,14 +250,40 @@ final class AppModel {
         }
     }
 
-    /// 某个工作区下要显示的会话（排除已归档、子 Agent 会话和没发过消息的空会话），按最近活动排序。
+    /// 侧栏主列表：所有进行中的顶层会话（排除已归档、子 Agent 会话和没发过消息的空会话），按最近活动排序。
     /// 空会话只在正选中时显示，发出第一条消息后就是正常会话。
-    func sessions(in workspace: Workspace) -> [SessionSummary] {
-        workspace.sessionIds
-            .filter { !board.archivedSessionIds.contains($0) }
-            .compactMap { sessions[$0] }
-            .filter { $0.parentSessionId == nil && (!$0.blank || $0.id == selectedSessionId) }
+    var activeSessions: [SessionSummary] {
+        sessions.values
+            .filter { $0.parentSessionId == nil && !board.archivedSessionIds.contains($0.id) && (!$0.blank || $0.id == selectedSessionId) }
             .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// 侧栏底部「归档」里的会话，按最近活动排序。
+    var archivedSessions: [SessionSummary] {
+        sessions.values
+            .filter { $0.parentSessionId == nil && board.archivedSessionIds.contains($0.id) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// 挂在某个会话下的子会话（子 Agent、分叉），按最近活动排序。
+    func children(of sessionId: String) -> [SessionSummary] {
+        sessions.values.filter { $0.parentSessionId == sessionId }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// 会话所在的工作区；子会话跟着父会话走。
+    func workspace(for session: SessionSummary) -> Workspace? {
+        if let parent = session.parentSessionId, let summary = sessions[parent] { return workspace(for: summary) }
+        return board.ordered.first { $0.sessionIds.contains(session.id) }
+            ?? session.cwd.flatMap { cwd in board.ordered.first { $0.path == cwd } }
+    }
+
+    /// 新建面板里的工作区：最近用过的在前，「无项目」（内核的默认工作区）放最后。
+    var workspacesByRecent: [Workspace] {
+        func lastUsed(_ workspace: Workspace) -> Date {
+            workspace.sessionIds.compactMap { sessions[$0]?.updatedAt }.max() ?? .distantPast
+        }
+        let all = board.ordered.sorted { lastUsed($0) > lastUsed($1) }
+        return all.filter { !$0.isDefault } + all.filter(\.isDefault)
     }
 
     func pendingCount(for sessionId: String) -> Int {
@@ -317,10 +347,20 @@ final class AppModel {
 
     // MARK: - 操作
 
-    func addWorkspace(path: String) async {
+    /// 添加工作区；`thenNewSession` 时等它出现在工作区列表里后直接新建一个会话。
+    func addWorkspace(path: String, thenNewSession: Bool = false) async {
         guard let connection else { return }
         do {
-            _ = try await connection.call("workspace/create", ["request": ["path": .string(path)]])
+            let value = try await connection.call("workspace/create", ["request": ["path": .string(path)]])
+            guard thenNewSession else { return }
+            let id = value["workspaceId"]?.stringValue ?? value["workspace"]?["workspaceId"]?.stringValue
+            for _ in 0..<40 {
+                if let workspace = board.ordered.first(where: { $0.id == id || $0.path == path }) {
+                    await newSession(in: workspace)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
         } catch {
             report(error)
         }
@@ -339,8 +379,76 @@ final class AppModel {
         }
     }
 
+    // MARK: - 归档
+
+    /// 闲置这么久的会话自动归档（设计稿 2026-10-29-session-list v1）。
+    static let autoArchiveAfter: TimeInterval = {
+        #if DEBUG
+        // 测试用：`WESTIE_AUTO_ARCHIVE_SECONDS` 缩短闲置时间
+        if let value = ProcessInfo.processInfo.environment["WESTIE_AUTO_ARCHIVE_SECONDS"].flatMap(Double.init) { return value }
+        #endif
+        return 3 * 24 * 3600
+    }()
+    private static let restoredKey = "sessionList.restoredAt"
+    private var autoArchiveTask: Task<Void, Never>?
+
+    func archive(_ sessionId: String) async {
+        guard let connection else { return }
+        do {
+            _ = try await connection.call("workspace/archiveSession", ["request": ["sessionId": .string(sessionId)]])
+        } catch let failure as RemoteFailure where failure.code.contains("Active") || failure.message.contains("active") {
+            lastError = "会话还在运行，停止后再归档"
+        } catch {
+            report(error)
+        }
+    }
+
+    func unarchive(_ sessionId: String) async {
+        guard let connection else { return }
+        // 恢复的会话从现在起重新计闲置时间，否则下一轮自动归档马上又把它收回去。
+        var restored = UserDefaults.standard.dictionary(forKey: Self.restoredKey) as? [String: Double] ?? [:]
+        restored[sessionId] = Date().timeIntervalSince1970
+        UserDefaults.standard.set(restored, forKey: Self.restoredKey)
+        do {
+            _ = try await connection.call("workspace/unarchiveSession", ["request": ["sessionId": .string(sessionId)]])
+        } catch {
+            report(error)
+        }
+    }
+
+    /// 连上内核后每 10 分钟检查一次：闲置超过 3 天、没在运行、没有待处理、不在显示的顶层会话归档。
+    /// 自动化脚本连真实数据时只读，不自动归档。
+    private func startAutoArchive() {
+        autoArchiveTask?.cancel()
+        let automation = ProcessInfo.processInfo.environment["WESTIE_AUTOMATION"] != nil
+        guard !automation || isMock else { return }
+        autoArchiveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.autoArchive()
+                try? await Task.sleep(for: .seconds(600))
+            }
+        }
+    }
+
+    private func autoArchive() async {
+        guard phase == .ready else { return }
+        let restored = UserDefaults.standard.dictionary(forKey: Self.restoredKey) as? [String: Double] ?? [:]
+        let cutoff = Date().addingTimeInterval(-Self.autoArchiveAfter)
+        let stale = activeSessions.filter { session in
+            let restoredAt = restored[session.id].map { Date(timeIntervalSince1970: $0) } ?? .distantPast
+            return max(session.updatedAt, restoredAt) < cutoff && !session.running && !session.blank
+                && pendingCount(for: session.id) == 0 && !wantedConversations.contains(session.id)
+        }
+        for session in stale { await archive(session.id) }
+        // 已经不在归档里的恢复记录没用了，顺手清掉。
+        let kept = restored.filter { board.archivedSessionIds.contains($0.key) == false && sessions[$0.key] != nil }
+        if kept.count != restored.count { UserDefaults.standard.set(kept, forKey: Self.restoredKey) }
+    }
+
     func send(_ text: String, to sessionId: String) async {
         guard let connection, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // 在归档的会话里发消息，它就回到主列表。
+        if board.archivedSessionIds.contains(sessionId) { await unarchive(sessionId) }
         do {
             _ = try await connection.call("session/prompt", ["request": [
                 "requestId": .string(UUID().uuidString),

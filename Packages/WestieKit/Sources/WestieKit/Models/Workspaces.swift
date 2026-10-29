@@ -1,10 +1,15 @@
 import Foundation
 
-public struct Workspace: Sendable, Identifiable, Equatable {
+public struct Workspace: Sendable, Identifiable, Hashable {
     public var id: String
     public var path: String
     public var title: String
     public var sessionIds: [String]
+
+    /// 内核首次启动时建的默认工作区（`…/deepseek-harness/default-workspace`），界面上叫「无项目」。
+    public var isDefault: Bool { URL(filePath: path).lastPathComponent == "default-workspace" }
+
+    public var displayTitle: String { isDefault ? "无项目" : title }
 }
 
 /// `workspace/follow` 的本地投影：baseline 之后按顺序应用增量帧。

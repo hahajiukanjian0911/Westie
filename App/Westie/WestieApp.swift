@@ -19,7 +19,7 @@ struct WestieApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 720)
-        .commands { PanelCommands(layout: appDelegate.layout) }
+        .commands { PanelCommands(model: appDelegate.model, layout: appDelegate.layout) }
     }
 }
 
@@ -67,11 +67,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
-/// 菜单栏：「设置…」（⌘,）打开设置卡片；「面板」显示或收起各面板，找回会话列表。
+/// 菜单栏：「新会话…」（⌘N）弹出选工作区的面板；「设置…」（⌘,）打开设置卡片；「面板」显示或收起各面板，找回会话列表。
 private struct PanelCommands: Commands {
+    let model: AppModel
     let layout: PanelLayout
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("新会话…") { model.showingNewSession = true }
+                .keyboardShortcut("n", modifiers: .command)
+        }
         CommandGroup(replacing: .appSettings) {
             Button("设置…") { layout.showSettings() }
                 .keyboardShortcut(",", modifiers: .command)

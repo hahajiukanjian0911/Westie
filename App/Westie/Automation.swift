@@ -15,6 +15,7 @@ import WestieKit
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
 ///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图）
+///      会话列表：`archive[:<序号>]` `unarchive`（恢复最近一个归档） `newpanel[:off]`（⌘N 面板）
 ///      设置：`settings[:<分页>]`（打开设置卡片并记录读到的值） `theme:<序号>`（换主题） `set:<键>=<值>`（写内核设置后重读）
 ///      `font:<项>=<值>`（改字体、字号、行高等，`preset=<序号>` 换搭配，`expand=true` 展开逐项自定义；项见下方 font 分支）
 ///      `modelpicker:<png 路径>`（离屏渲染输入框的模型弹层）
@@ -42,7 +43,7 @@ enum Automation {
             return
         }
         note("ready mock=\(model.isMock)")
-        let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer", "set"]
+        let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer", "set", "archive", "unarchive"]
 
         for step in script.split(separator: ";").map({ $0.trimmingCharacters(in: .whitespaces) }) where !step.isEmpty {
             let (verb, argument) = step.firstIndex(of: ":").map {
@@ -55,7 +56,7 @@ enum Automation {
             switch verb {
             case "split":
                 await until { !model.board.ordered.isEmpty }
-                let all = model.board.ordered.flatMap { model.sessions(in: $0) }
+                let all = model.activeSessions
                 guard let index = Int(argument), all.indices.contains(index) else { note("FAIL 没有第 \(argument) 个会话"); continue }
                 layout.openConversation(all[index].id, mode: .sideBySide)
                 await until { model.conversations[all[index].id]?.isLoading == false }
@@ -106,7 +107,7 @@ enum Automation {
             case "select":
                 trace("select \(argument)")
                 await until { !model.board.ordered.isEmpty }
-                let all = model.board.ordered.flatMap { model.sessions(in: $0) }
+                let all = model.activeSessions
                 // 序号或会话 id
                 guard let id = Int(argument).flatMap({ all.indices.contains($0) ? all[$0].id : nil })
                     ?? all.first(where: { $0.id == argument })?.id else { note("FAIL 没有会话 \(argument)"); continue }
@@ -176,14 +177,33 @@ enum Automation {
             case "shot":
                 try? await Task.sleep(for: .milliseconds(400))
                 note(snapshot(to: URL(filePath: argument)) ? "shot \(argument)" : "FAIL shot \(argument)")
+            case "archive":
+                // 归档主列表第 n 个会话（默认选中的）
+                guard let id = Int(argument).flatMap({ model.activeSessions.indices.contains($0) ? model.activeSessions[$0].id : nil })
+                    ?? model.selectedSessionId else { note("FAIL 没有可归档的会话"); continue }
+                let before = model.board.archivedSessionIds.count
+                await model.archive(id)
+                await until { model.board.archivedSessionIds.count > before }
+                note("archived \(id) total=\(model.board.archivedSessionIds.count)")
+            case "unarchive":
+                guard let session = model.archivedSessions.first else { note("FAIL 归档是空的"); continue }
+                await model.unarchive(session.id)
+                await until { !model.board.archivedSessionIds.contains(session.id) }
+                note("unarchived \(session.id)")
+            case "newpanel":
+                // 打开或收起 ⌘N 面板（截图用）
+                model.showingNewSession = argument != "off"
             case "dump":
                 // 侧栏的毛玻璃材质 cacheDisplay 画不出来，用数据核对侧栏内容。
-                for workspace in model.board.ordered {
-                    let rows = model.sessions(in: workspace).map {
-                        "\($0.displayTitle)\($0.running ? "[运行中]" : "")\($0.id == model.selectedSessionId ? "[选中]" : "")"
-                    }
-                    note("sidebar \(workspace.title): \(rows.joined(separator: " | "))")
+                func describe(_ session: SessionSummary) -> String {
+                    let kids = model.children(of: session.id).count
+                    return "\(model.workspace(for: session)?.displayTitle ?? "?")/\(session.displayTitle)"
+                        + (session.running ? "[运行中]" : "") + (kids > 0 ? "[子\(kids)]" : "")
+                        + (session.id == model.selectedSessionId ? "[选中]" : "")
                 }
+                note("sidebar active: \(model.activeSessions.map(describe).joined(separator: " | "))")
+                note("sidebar archived(\(model.archivedSessions.count)): \(model.archivedSessions.prefix(5).map(describe).joined(separator: " | "))")
+                note("newpanel: \(model.workspacesByRecent.map(\.displayTitle).joined(separator: " | "))")
             case "settings":
                 // 打开设置卡片，可带分页：general / account / appearance / advanced
                 if let tab = SettingsTab(rawValue: argument) { model.settings.tab = tab }

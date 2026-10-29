@@ -284,10 +284,6 @@ private struct WindowTile: View {
             title
             Spacer(minLength: 4)
             HStack(spacing: 2) {
-                if onFrame {
-                    Button("添加工作区", systemImage: "folder.badge.plus") { SidebarView.chooseFolder(model: model) }
-                        .help("添加工作区")
-                }
                 Button("移动窗口", systemImage: "square.grid.3x1.below.line.grid.1x2") { showingMap = true }
                     .help("移动窗口")
                     .popover(isPresented: $showingMap, arrowEdge: .bottom) {

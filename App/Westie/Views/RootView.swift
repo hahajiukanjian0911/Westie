@@ -33,6 +33,12 @@ struct RootView: View {
                 workbenchShown = ready
             }
         }
+        .overlay {
+            if model.showingNewSession, model.phase == .ready {
+                NewSessionPanel(model: model)
+                    .transition(.opacity.animation(.easeOut(duration: 0.14)))
+            }
+        }
         .overlay(alignment: .top) { errorBanner }
         .environment(\.palette, palette)
         .environment(\.typography, model.appearance.typography)
