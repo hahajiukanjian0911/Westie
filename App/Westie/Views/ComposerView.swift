@@ -88,11 +88,24 @@ private struct ModelMenu: View {
     }
 }
 
-private struct ModelPicker: View {
+struct ModelPicker: View {
     let model: AppModel
     let conversation: ConversationModel
     @State private var choice: ModelChoice?
     @State private var effortIndex: Double = 0
+    @Environment(\.palette) private var palette
+
+    private var groups: [(name: String, models: [ModelChoice])] {
+        var result: [(name: String, models: [ModelChoice])] = []
+        for option in model.models {
+            if let index = result.firstIndex(where: { $0.name == option.group }) {
+                result[index].models.append(option)
+            } else {
+                result.append((option.group, [option]))
+            }
+        }
+        return result
+    }
 
     init(model: AppModel, conversation: ConversationModel, initial: (choice: ModelChoice?, effort: String?)) {
         self.model = model
@@ -104,13 +117,18 @@ private struct ModelPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("模型", selection: $choice) {
-                ForEach(model.models) { option in
-                    Text(option.name).tag(Optional(option))
+            // 自己画的单选行：系统的单选 Picker 不跟随界面字体。有多个提供方时按提供方分组，同名模型才分得清。
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(groups, id: \.name) { group in
+                    if groups.count > 1 {
+                        Text(group.name).uiFont(11).foregroundStyle(palette.ink3)
+                            .padding(.top, group.name == groups.first?.name ? 0 : 6).padding(.leading, 6)
+                    }
+                    ForEach(group.models) { option in
+                        ModelRow(name: option.name, selected: option == choice) { choice = option }
+                    }
                 }
             }
-            .pickerStyle(.inline)
-            .labelsHidden()
             if let efforts = choice?.efforts, efforts.count > 1 {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("思考：\(efforts[min(Int(effortIndex), efforts.count - 1)])")
@@ -133,6 +151,33 @@ private struct ModelPicker: View {
         let efforts = choice.efforts
         let effort = efforts.isEmpty ? nil : efforts[min(Int(effortIndex), efforts.count - 1)]
         Task { await model.selectModel(choice, effort: effort, for: conversation.sessionId) }
+    }
+}
+
+private struct ModelRow: View {
+    let name: String
+    let selected: Bool
+    let action: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
+                    .uiFont(10, .semibold)
+                    .foregroundStyle(palette.accent)
+                    .opacity(selected ? 1 : 0)
+                Text(name).uiFont(13).foregroundStyle(palette.ink)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 26)
+            .background(hovering ? palette.rowHover : .clear, in: .rect(cornerRadius: 6))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 

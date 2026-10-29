@@ -190,7 +190,11 @@ private struct GeneralPage: View {
                         guard let choice else { return }
                         Task { await settings.setDefaultModel(choice, effort: choice.defaultEffort) }
                     })) {
-                        ForEach(model.models) { Text($0.name).tag(Optional($0)) }
+                        ForEach(model.models) { option in
+                            // 多个提供方里有同名模型时带上提供方
+                            let duplicated = model.models.filter { $0.name == option.name }.count > 1
+                            Text(duplicated ? "\(option.name) · \(option.group)" : option.name).tag(Optional(option))
+                        }
                     }
                     .labelsHidden()
                     .fixedSize()

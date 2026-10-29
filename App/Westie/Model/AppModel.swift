@@ -35,6 +35,8 @@ struct ModelChoice: Hashable, Identifiable {
     let provider: String
     let model: String
     let name: String
+    /// 提供方的显示名（如 API Key 与账号各一组时用来区分同名模型）。
+    var group = ""
     let efforts: [String]
     let defaultEffort: String?
 }
@@ -404,10 +406,11 @@ final class AppModel {
         let catalog = try await connection.call("session/modelCatalog")
         models = (catalog["groups"]?.arrayValue ?? []).flatMap { group -> [ModelChoice] in
             let provider = group["id"]?.stringValue ?? ""
+            let groupName = group["name"]?.stringValue ?? provider
             return (group["models"]?.arrayValue ?? []).compactMap { model in
                 guard let id = model["id"]?.stringValue else { return nil }
                 return ModelChoice(
-                    provider: provider, model: id, name: model["name"]?.stringValue ?? id,
+                    provider: provider, model: id, name: model["name"]?.stringValue ?? id, group: groupName,
                     efforts: model["reasoning"]?["efforts"]?.arrayValue?.compactMap { $0["id"]?.stringValue } ?? [],
                     defaultEffort: model["reasoning"]?["defaultEffort"]?.stringValue
                 )

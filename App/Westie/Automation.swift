@@ -207,6 +207,23 @@ enum Automation {
                 let t = appearance.typography
                 note("font ui=\(t.uiLatin.name)/\(t.uiCJK.name) chat=\(t.chatLatin.name)/\(t.chatCJK.name)@\(t.chatSize) code=\(t.codeFont.name)@\(t.codeSize) probe=\(Int(t.chatProbeWidth.rounded()))")
                 try? await Task.sleep(for: .milliseconds(300))
+            case "modelpicker":
+                // 模型弹层是 popover，cacheDisplay 截不到；离屏单独渲染一份核对字体与分组。
+                guard let conversation = model.conversation else { note("FAIL modelpicker 没有打开的会话"); continue }
+                let palette = Palette(colors: model.appearance.theme.hues, dark: false)
+                let view = ModelPicker(model: model, conversation: conversation, initial: (model.defaultModel, model.defaultModel?.defaultEffort))
+                    .environment(\.palette, palette)
+                    .environment(\.typography, model.appearance.typography)
+                    .background(palette.card)
+                let renderer = ImageRenderer(content: view)
+                renderer.scale = 2
+                if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+                   let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(filePath: argument))
+                    note("modelpicker \(argument) groups=\(Set(model.models.map(\.group)).sorted())")
+                } else {
+                    note("FAIL modelpicker")
+                }
             case "theme":
                 if let index = Int(argument) { model.appearance.themeIndex = index }
                 try? await Task.sleep(for: .milliseconds(300))
