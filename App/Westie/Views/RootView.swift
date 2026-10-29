@@ -14,8 +14,8 @@ struct RootView: View {
                 status
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .card(palette)
+                    // 和 Workbench 一样卡片顶到窗口上沿（红绿灯落在卡片上），不单独留一条标题栏
                     .padding(Metrics.gap)
-                    .padding(.top, Metrics.lightsHeight - Metrics.gap)
                     .background { FrameBackground() }
                     .ignoresSafeArea(.container, edges: .top)
             }
