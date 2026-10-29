@@ -28,6 +28,8 @@ struct KernelConfiguration {
             // 可用 WESTIE_DSH_HOME 另指一份测试数据，和已开着的假模型实例互不干扰。
             location.dshHome = environment["WESTIE_DSH_HOME"].map { URL(filePath: $0) }
                 ?? repoRoot.appending(path: "temp/dsh-home")
+            // 假模型会建会话、发消息，绝不能落到真实 ~/.dsh
+            guard !isRealDSHHome(location.dshHome) else { throw KernelConfigurationError.mockOnRealDSHHome }
             options.scrubCredentials = true
             options.environment["DEEPSEEK_API_KEY"] = "westie-mock"
             options.environment["DEEPSEEK_BASE_URL"] = "http://127.0.0.1:\(port)"
@@ -38,8 +40,22 @@ struct KernelConfiguration {
         } else {
             location.dshHome = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".dsh")
         }
-        let shares = location.dshHome.standardizedFileURL.path
-            == FileManager.default.homeDirectoryForCurrentUser.appending(path: ".dsh").standardizedFileURL.path
-        return KernelConfiguration(location: location, options: options, sharesDSHHome: shares, isMock: false)
+        return KernelConfiguration(location: location, options: options,
+                                   sharesDSHHome: isRealDSHHome(location.dshHome), isMock: false)
+    }
+
+    /// 按解析符号链接后的路径比较，软链接指过去的也算。
+    private static func isRealDSHHome(_ url: URL) -> Bool {
+        let real = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".dsh")
+        return url.resolvingSymlinksInPath().standardizedFileURL.path
+            == real.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+}
+
+enum KernelConfigurationError: LocalizedError {
+    case mockOnRealDSHHome
+
+    var errorDescription: String? {
+        "假模型模式不能使用真实的 ~/.dsh，请把 WESTIE_DSH_HOME 指向测试目录。"
     }
 }

@@ -58,8 +58,12 @@ struct ConversationView: View {
                 atBottom = value
             }
             .onScrollPhaseChange { old, new in
-                // 只看用户自己滚动的结果，程序滚动（.animating）不改变跟随状态
-                if new == .idle, old == .interacting || old == .decelerating { following = atBottom }
+                // 用户一动手就停止跟随，松手停稳后按是否在底部决定恢复；程序滚动（.animating）不改变跟随状态
+                if new == .interacting {
+                    following = false
+                } else if new == .idle, old == .interacting || old == .decelerating {
+                    following = atBottom
+                }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
                 guard following, new > old else { return }

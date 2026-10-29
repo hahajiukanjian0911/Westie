@@ -13,9 +13,10 @@ struct MarkdownText: View {
     var body: some View {
         Group {
             if streaming {
-                // 只在流式时逐帧重画：TextRenderer 按当前时间算每段字的透明度
+                // 只在流式时逐帧重画：TextRenderer 按当前时间算每段字的透明度。holdBack 只在文字变化时算
+                let visible = StreamingMarkdownParser.holdBack(text)
                 TimelineView(.animation) { context in
-                    styled(StructuredText(StreamingMarkdownParser.holdBack(text), parser: parser))
+                    styled(StructuredText(visible, parser: parser))
                         .textRenderer(StreamFadeRenderer(now: context.date.timeIntervalSinceReferenceDate))
                 }
                 .environment(\.appearFade, true)
@@ -327,28 +328,88 @@ final class StreamingMarkdownParser: MarkupParser {
     }
 
     /// 没写完的语法先不显示，免得露出 Markdown 原文或排版来回跳：
-    /// 末尾的表格等收齐再整块出现；只有 `-`/`=` 的行会把上一段临时变成标题；
-    /// 最后一行没闭合的 `**` 和反引号截到开头之前。代码块里不处理。
+    /// 末尾的表格要等后面出现空行或别的内容才整块出现；正在写的一行只有 `-`/`=`/`*` 时
+    /// 会把上一段临时变成标题或分隔线，先不显示；正在写的一行里没闭合的行内代码和 `**` 截到开头之前。
+    /// 还在代码块里时原样显示。
     static func holdBack(_ text: String) -> String {
         var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        var inFence = false
-        for line in lines where line.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inFence.toggle() }
-        guard !inFence else { return text }
+        guard !endsInsideFence(lines), let current = lines.popLast() else { return text }
 
-        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).hasPrefix("|") { lines.removeLast() }
-        if let last = lines.last?.trimmingCharacters(in: .whitespaces), !last.isEmpty,
-           last.allSatisfy({ "-=*`".contains($0) }) {
-            lines.removeLast()
+        if current.isEmpty || isTableLine(current) {
+            var kept = lines
+            var heldTable = isTableLine(current)
+            while let last = kept.last, isTableLine(last) { kept.removeLast(); heldTable = true }
+            if heldTable { return kept.joined(separator: "\n") }
         }
-        guard var last = lines.popLast() else { return "" }
-        for marker in ["**", "`"] {
-            let parts = last.components(separatedBy: marker)
-            if parts.count % 2 == 0, let range = last.range(of: marker, options: .backwards) {
-                last = String(last[..<range.lowerBound])
+        let trimmed = current.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty, trimmed.allSatisfy({ "-=* ".contains($0) })
+            || (trimmed.count < 3 && trimmed.allSatisfy({ "`~".contains($0) })) {
+            return lines.joined(separator: "\n")
+        }
+        lines.append(closedPrefix(of: current))
+        return lines.joined(separator: "\n")
+    }
+
+    private static func isTableLine(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespaces).hasPrefix("|")
+    }
+
+    /// 按 CommonMark 的围栏规则：``` 或 ~~~ 至少三个、缩进不超过三格；关闭要同一种字符、不短于开头、后面只有空白。
+    private static func endsInsideFence(_ lines: [String]) -> Bool {
+        var fence: (marker: Character, length: Int)?
+        for line in lines {
+            let body = line.drop(while: { $0 == " " })
+            guard line.count - body.count <= 3, let marker = body.first, marker == "`" || marker == "~" else { continue }
+            let length = body.prefix(while: { $0 == marker }).count
+            guard length >= 3 else { continue }
+            let rest = body.dropFirst(length)
+            if let open = fence {
+                if marker == open.marker, length >= open.length, rest.allSatisfy(\.isWhitespace) { fence = nil }
+            } else if !(marker == "`" && rest.contains("`")) {
+                fence = (marker, length)
             }
         }
-        lines.append(last)
-        return lines.joined(separator: "\n")
+        return fence != nil
+    }
+
+    /// 截掉一行里没闭合的语法：行内代码按反引号个数配对，`**` 只在代码外计数，反斜杠转义的不算。
+    private static func closedPrefix(of line: String) -> String {
+        let chars = Array(line)
+        var strongOpen: Int?
+        var index = 0
+        func run(of mark: Character, at start: Int) -> Int {
+            var end = start
+            while end < chars.count, chars[end] == mark { end += 1 }
+            return end - start
+        }
+        while index < chars.count {
+            switch chars[index] {
+            case "\\":
+                index += 2
+            case "`":
+                let length = run(of: "`", at: index)
+                var cursor = index + length
+                var closed = false
+                while cursor < chars.count {
+                    if chars[cursor] == "`" {
+                        let other = run(of: "`", at: cursor)
+                        cursor += other
+                        if other == length { closed = true; break }
+                    } else {
+                        cursor += 1
+                    }
+                }
+                guard closed else { return String(chars[..<(strongOpen ?? index)]) }
+                index = cursor
+            case "*":
+                let length = run(of: "*", at: index)
+                if length >= 2 { strongOpen = strongOpen == nil ? index : nil }
+                index += length
+            default:
+                index += 1
+            }
+        }
+        return strongOpen.map { String(chars[..<$0]) } ?? line
     }
 }
 
