@@ -112,16 +112,19 @@ final class PanelLayout {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var dwellTask: Task<Void, Never>?
 
-    private static let storageKey = "Westie.panelLayout.v1"
+    /// 布局里的对话窗口指向某份数据里的会话，所以按数据目录分开保存：真实 `~/.dsh` 沿用原来的键，
+    /// 假模型或另指的测试数据各用各的，互相恢复不出对方的会话窗口。
+    @ObservationIgnored private let storageKey: String
 
     private struct Saved: Codable {
         var panels: [PanelID: PanelState]
         var focused: UUID?
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, dataScope: String? = nil) {
         self.defaults = defaults
-        let saved = defaults.data(forKey: Self.storageKey).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
+        storageKey = "Westie.panelLayout.v1" + (dataScope.map { ".\($0)" } ?? "")
+        let saved = defaults.data(forKey: storageKey).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
         var panels = saved?.panels ?? Self.defaultPanels
         for id in PanelID.allCases where panels[id] == nil { panels[id] = Self.defaultPanels[id] }
         self.panels = panels
@@ -548,6 +551,6 @@ final class PanelLayout {
 
     func save() {
         guard let data = try? JSONEncoder().encode(Saved(panels: panels, focused: focusedWindowId)) else { return }
-        defaults.set(data, forKey: Self.storageKey)
+        defaults.set(data, forKey: storageKey)
     }
 }
