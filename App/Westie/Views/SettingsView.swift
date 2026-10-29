@@ -423,6 +423,11 @@ private struct FontSettings: View {
                     .labelsHidden()
                     .fixedSize()
                 }
+                SettingsRow(label: "对话宽度") {
+                    ValueSlider(value: appearance.chatWidth, range: Typography.chatWidths, step: 20, format: {
+                        $0 >= Typography.chatWidths.upperBound ? "铺满" : "\(Int($0))"
+                    }) { appearance.chatWidth = $0 }
+                }
             }
             Button {
                 withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }

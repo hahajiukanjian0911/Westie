@@ -206,6 +206,7 @@ enum Automation {
                 case "lineHeight": appearance.lineHeight = Double(parts[1]) ?? appearance.lineHeight
                 case "paragraph": appearance.paragraphSpacing = Double(parts[1]) ?? appearance.paragraphSpacing
                 case "tracking": appearance.tracking = Double(parts[1]) ?? appearance.tracking
+                case "chatWidth": appearance.chatWidth = Double(parts[1]) ?? appearance.chatWidth
                 case "codeLineHeight": appearance.codeLineHeight = Double(parts[1]) ?? appearance.codeLineHeight
                 case "preset": appearance.apply(AppearanceSettings.fontPresets[min(Int(parts[1]) ?? 0, AppearanceSettings.fontPresets.count - 1)])
                 case "expand": model.settings.fontsExpanded = parts[1] == "true"

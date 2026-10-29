@@ -56,6 +56,8 @@ final class AppearanceSettings {
     var paragraphSpacing: Double { didSet { save() } }
     var tracking: Double { didSet { save() } }
     var codeLineHeight: Double { didSet { save() } }
+    /// 对话栏宽度（不属于搭配，换搭配时不变）。
+    var chatWidth: Double { didSet { save() } }
 
     /// 一组搭配：一点即换全部字体、字号和行距（设计稿 v4 的 B）。
     struct FontPreset: Identifiable {
@@ -112,7 +114,8 @@ final class AppearanceSettings {
             lineHeight: lineHeight,
             paragraphSpacing: paragraphSpacing,
             tracking: tracking,
-            codeLineHeight: codeLineHeight
+            codeLineHeight: codeLineHeight,
+            chatWidth: chatWidth
         )
     }
 
@@ -147,6 +150,7 @@ final class AppearanceSettings {
         paragraphSpacing = fonts["paragraphSpacing"] as? Double ?? 12
         tracking = fonts["tracking"] as? Double ?? 0
         codeLineHeight = fonts["codeLineHeight"] as? Double ?? 1.55
+        chatWidth = fonts["chatWidth"] as? Double ?? 760
     }
 
     /// 浅深色落在 App 级 appearance 上（菜单、弹层一起变），不动系统设置。
@@ -162,7 +166,7 @@ final class AppearanceSettings {
         let fonts: [String: Any] = [
             "uiLatin": uiLatin, "uiCJK": uiCJK, "chatLatin": chatLatin, "chatCJK": chatCJK,
             "chatSize": chatSize, "code": codeFont, "codeSize": codeSize,
-            "lineHeight": lineHeight, "paragraphSpacing": paragraphSpacing, "tracking": tracking, "codeLineHeight": codeLineHeight,
+            "lineHeight": lineHeight, "paragraphSpacing": paragraphSpacing, "tracking": tracking, "codeLineHeight": codeLineHeight, "chatWidth": chatWidth,
         ]
         defaults.set(["mode": mode.rawValue, "theme": themeIndex, "grain": grain, "fonts": fonts], forKey: Self.key)
     }

@@ -3,6 +3,7 @@ import WestieKit
 
 struct ConversationView: View {
     @Environment(\.palette) private var palette
+    @Environment(\.typography) private var typography
     let model: AppModel
     let conversation: ConversationModel
     /// 跟随到底：内容变高时平滑滚到底；用户往上翻就停，翻回底部再接着跟。
@@ -56,7 +57,7 @@ struct ConversationView: View {
                 }
                 .scrollTargetLayout()
                 .opacity(revealed ? 1 : 0)
-                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
                 .padding(.bottom, 24)
@@ -89,7 +90,7 @@ struct ConversationView: View {
             .overlay(alignment: .bottom) {
                 if conversation.isLoading, placeholderShown {
                     LoadingPlaceholder()
-                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
                         .padding(.horizontal, 24)
                         .padding(.bottom, 24)
                         // 出现时淡入；内容到了同一帧直接移除，不和内容交叉淡变
@@ -116,7 +117,7 @@ struct ConversationView: View {
             }
 
             ComposerView(model: model, conversation: conversation, running: running)
-                .frame(maxWidth: 760)
+                .frame(maxWidth: typography.chatColumnWidth)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
                 .frame(maxWidth: .infinity)
