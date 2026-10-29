@@ -205,7 +205,7 @@ enum Automation {
                 default: note("FAIL 未知字体项 \(parts[0])")
                 }
                 let t = appearance.typography
-                note("font ui=\(t.uiLatin.name)/\(t.uiCJK.name) chat=\(t.chatLatin.name)/\(t.chatCJK.name)@\(t.chatSize) code=\(t.codeFont.name)@\(t.codeSize)")
+                note("font ui=\(t.uiLatin.name)/\(t.uiCJK.name) chat=\(t.chatLatin.name)/\(t.chatCJK.name)@\(t.chatSize) code=\(t.codeFont.name)@\(t.codeSize) probe=\(Int(t.chatProbeWidth.rounded()))")
                 try? await Task.sleep(for: .milliseconds(300))
             case "theme":
                 if let index = Int(argument) { model.appearance.themeIndex = index }

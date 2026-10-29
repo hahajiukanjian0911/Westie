@@ -117,19 +117,62 @@ struct Typography: Equatable, Sendable {
            font.familyName == family {
             base = font
         } else {
-            switch latin.design {
-            case .monospaced: base = .monospacedSystemFont(ofSize: size, weight: nsWeight)
-            case .serif:
-                let system = NSFont.systemFont(ofSize: size, weight: nsWeight)
-                base = system.fontDescriptor.withDesign(.serif).flatMap { NSFont(descriptor: $0, size: size) } ?? system
-            case .standard: base = .systemFont(ofSize: size, weight: nsWeight)
+            base = systemFont(latin.design, size: size, weight: nsWeight)
+            // 系统字体（.AppleSystemUIFont 一族）接非苹方的中文字体时，会按苹方的规则给句号、逗号、分号
+            // 多加半个字宽。改用同一款字体的文件（SFNS.ttf 等），带上系统字体的字重和视觉字号，就没有这个问题。
+            // 只有标准的 SF Pro 接苹方是对的；New York、SF Mono 自带的中文后备一样会加宽。
+            if !nativePair(latin, cjk) {
+                base = fileSystemFont(latin.design, matching: base) ?? base
             }
         }
-        guard let family = cjk?.family else { return base }
+        // SF Pro 本来就以苹方为中文后备，不用再挂
+        guard let family = cjk?.family, !nativePair(latin, cjk) else { return base }
         let fallback = NSFontDescriptor(fontAttributes: [.family: family, .traits: [NSFontDescriptor.TraitKey.weight: nsWeight]])
         let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: [fallback]])
         return NSFont(descriptor: descriptor, size: size) ?? base
     }
+}
+
+extension Typography {
+    /// SF Pro + 苹方（或不带中文）：直接用系统字体最稳。
+    private static func nativePair(_ latin: FontOption, _ cjk: FontOption?) -> Bool {
+        latin.family == nil && latin.design == .standard && (cjk == nil || cjk?.family == FontOption.pingFang.family)
+    }
+
+    static func systemFont(_ design: FontOption.SystemDesign, size: CGFloat, weight: NSFont.Weight) -> NSFont {
+        switch design {
+        case .monospaced: return .monospacedSystemFont(ofSize: size, weight: weight)
+        case .serif:
+            let system = NSFont.systemFont(ofSize: size, weight: weight)
+            return system.fontDescriptor.withDesign(.serif).flatMap { NSFont(descriptor: $0, size: size) } ?? system
+        case .standard: return .systemFont(ofSize: size, weight: weight)
+        }
+    }
+
+    /// 系统字体对应的字体文件，只加载一次。
+    nonisolated(unsafe) private static let fileDescriptors: [FontOption.SystemDesign: CTFontDescriptor] = {
+        let files: [FontOption.SystemDesign: String] = [.standard: "SFNS.ttf", .serif: "NewYork.ttf", .monospaced: "SFNSMono.ttf"]
+        return files.compactMapValues { file in
+            let url = URL(filePath: "/System/Library/Fonts/\(file)")
+            return (CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor])?.first
+        }
+    }()
+
+    /// 从字体文件取同一款字体，字重、视觉字号等可变轴照抄系统字体当前的取值。
+    private static func fileSystemFont(_ design: FontOption.SystemDesign, matching system: NSFont) -> NSFont? {
+        guard let file = fileDescriptors[design] else { return nil }
+        let variation = CTFontCopyVariation(system as CTFont) ?? ([:] as CFDictionary)
+        let descriptor = CTFontDescriptorCreateCopyWithAttributes(file, [kCTFontVariationAttribute: variation] as CFDictionary)
+        return CTFontCreateWithFontDescriptor(descriptor, system.pointSize, nil) as NSFont
+    }
+
+    #if DEBUG
+    /// 自动化核对用：一段中文在对话字体下的宽度，标点被加宽时会明显变大。
+    var chatProbeWidth: CGFloat {
+        let font = Self.make(chatLatin, cjk: chatCJK, size: chatSize, weight: .regular)
+        return NSAttributedString(string: "件。我，区；暂", attributes: [.font: font]).size().width
+    }
+    #endif
 }
 
 private extension Font.Weight {
