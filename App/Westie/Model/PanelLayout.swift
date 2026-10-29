@@ -29,6 +29,7 @@ enum PanelID: String, Codable, CaseIterable, Identifiable {
 enum WindowContent: Codable, Hashable {
     case sessions
     case conversation(sessionId: String)
+    case settings
 
     var sessionId: String? {
         if case .conversation(let id) = self { id } else { nil }
@@ -313,6 +314,17 @@ final class PanelLayout {
             let window = PanelWindow(content: .sessions)
             mutate(.primary) { $0.windows.insert(window, at: 0) }
             showSideBySide(window.id)
+        }
+    }
+
+    /// 设置卡片（设计稿 2026-10-29-settings v1 方向 B）：已经开着就切过去，否则在对话面板里开一张。
+    func showSettings() {
+        if let (_, window) = locate(.settings) {
+            reveal(window.id)
+        } else {
+            let window = PanelWindow(content: .settings)
+            mutate(.center) { $0.windows.append(window) }
+            reveal(window.id)
         }
     }
 

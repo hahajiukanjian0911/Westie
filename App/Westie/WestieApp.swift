@@ -10,6 +10,7 @@ struct WestieApp: App {
             RootView(model: appDelegate.model, layout: appDelegate.layout)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
+                    appDelegate.model.appearance.apply()
                     await appDelegate.model.start()
                     #if DEBUG
                     await Automation.runIfRequested(model: appDelegate.model, layout: appDelegate.layout)
@@ -66,11 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
-/// 菜单栏「面板」：显示或收起各面板，找回会话列表。
+/// 菜单栏：「设置…」（⌘,）打开设置卡片；「面板」显示或收起各面板，找回会话列表。
 private struct PanelCommands: Commands {
     let layout: PanelLayout
 
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("设置…") { layout.showSettings() }
+                .keyboardShortcut(",", modifiers: .command)
+        }
         CommandMenu("面板") {
             Button("主边栏") { layout.toggle(.primary) }
                 .keyboardShortcut("s", modifiers: [.control, .command])

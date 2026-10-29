@@ -23,6 +23,8 @@ struct Palette {
     /// 拖放预览：半透明的卡片底和一圈强调色描边。
     let preview, previewRing: Color
     let frameBase: Color
+    /// 外框是否铺一层颗粒（外观设置里的「颗粒质感」）。
+    var grain = true
     /// 外框的两团晕色：颜色和中心位置。
     let frameGlows: [(color: Color, center: UnitPoint)]
 
@@ -106,10 +108,12 @@ struct FrameBackground: View {
             ForEach(Array(palette.frameGlows.enumerated()), id: \.offset) { _, glow in
                 EllipticalGradient(colors: [glow.color, glow.color.opacity(0)], center: glow.center, endRadiusFraction: 0.72)
             }
-            Image(decorative: Self.grain, scale: 2)
-                .resizable(resizingMode: .tile)
-                .blendMode(palette.dark ? .softLight : .overlay)
-                .opacity(0.22)
+            if palette.grain {
+                Image(decorative: Self.grain, scale: 2)
+                    .resizable(resizingMode: .tile)
+                    .blendMode(palette.dark ? .softLight : .overlay)
+                    .opacity(0.22)
+            }
             AppMoveArea()
         }
         .ignoresSafeArea()

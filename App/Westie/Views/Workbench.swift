@@ -412,6 +412,8 @@ private struct WindowTile: View {
                 // 会话模型下一帧就建好，这里留空，不闪转圈
                 Color.clear
             }
+        case .settings:
+            SettingsView(model: model)
         }
     }
 }
@@ -779,6 +781,7 @@ private struct AssistView: View {
     private func detail(_ window: PanelWindow) -> String {
         switch window.content {
         case .sessions: return "会话列表"
+        case .settings: return "设置"
         case .conversation(let id):
             guard let session = model.sessions[id] else { return "" }
             let folder = session.cwd.map { URL(filePath: $0).lastPathComponent } ?? ""
@@ -839,6 +842,7 @@ extension WindowContent {
     func title(model: AppModel) -> String {
         switch self {
         case .sessions: "Westie"
+        case .settings: "设置"
         case .conversation(let id): model.sessions[id]?.displayTitle ?? "会话"
         }
     }

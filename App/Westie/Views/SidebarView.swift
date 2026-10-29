@@ -9,6 +9,20 @@ struct SidebarView: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
+        VStack(spacing: 0) {
+            sessionList
+            SettingsEntry(selected: settingsFocused) { layout.showSettings() }
+                .padding(.top, 4)
+                .padding(.bottom, 8)
+        }
+    }
+
+    /// 设置卡片正聚焦时，入口跟会话行一样高亮。
+    private var settingsFocused: Bool {
+        layout.focusedWindowId.flatMap { layout.locate($0) }?.window.content == .settings
+    }
+
+    private var sessionList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(model.board.ordered) { workspace in
@@ -74,6 +88,42 @@ private struct WorkspaceHeader: View {
         .frame(height: 28)
         .padding(.top, 12)
         .onHover { hovering = $0 }
+    }
+}
+
+/// 侧栏底部的设置入口（设计稿 2026-10-29-settings v1 方向 B）。
+private struct SettingsEntry: View {
+    let selected: Bool
+    let open: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Image(systemName: "gearshape").font(.system(size: 13))
+                Text("设置")
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(selected || hovering ? palette.ink : palette.ink2)
+            .padding(.horizontal, 8)
+            .frame(height: 32)
+            .background {
+                RoundedRectangle(cornerRadius: Metrics.rowRadius)
+                    .fill(selected ? palette.rowOn : hovering ? palette.rowHover : .clear)
+                    .overlay {
+                        if selected {
+                            RoundedRectangle(cornerRadius: Metrics.rowRadius).strokeBorder(palette.rowOnStroke, lineWidth: 0.5)
+                        }
+                    }
+                    .shadow(color: selected ? palette.cardShadowNear : .clear, radius: 1, y: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("设置（⌘,）")
     }
 }
 

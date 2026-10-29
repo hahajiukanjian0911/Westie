@@ -50,7 +50,11 @@ struct RootView: View {
         }
     }
 
-    private var palette: Palette { Palette(dark: colorScheme == .dark) }
+    private var palette: Palette {
+        var palette = Palette(colors: model.appearance.theme.hues, dark: colorScheme == .dark)
+        palette.grain = model.appearance.grain
+        return palette
+    }
 
     @ViewBuilder
     private var status: some View {

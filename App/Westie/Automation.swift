@@ -14,6 +14,7 @@ import WestieKit
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
 ///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图）
+///      设置：`settings[:<分页>]`（打开设置卡片并记录读到的值） `theme:<序号>`（换主题） `set:<键>=<值>`（写内核设置后重读）
 ///
 /// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
@@ -38,7 +39,7 @@ enum Automation {
             return
         }
         note("ready mock=\(model.isMock)")
-        let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer"]
+        let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer", "set"]
 
         for step in script.split(separator: ";").map({ $0.trimmingCharacters(in: .whitespaces) }) where !step.isEmpty {
             let (verb, argument) = step.firstIndex(of: ":").map {
@@ -163,6 +164,33 @@ enum Automation {
                     }
                     note("sidebar \(workspace.title): \(rows.joined(separator: " | "))")
                 }
+            case "settings":
+                // 打开设置卡片，可带分页：general / account / appearance / advanced
+                if let tab = SettingsTab(rawValue: argument) { model.settings.tab = tab }
+                layout.showSettings()
+                await until { model.settings.loaded }
+                note("settings tab=\(model.settings.tab.rawValue) model=\(model.settings.defaultModel.map { "\($0.model)/\($0.effort ?? "-")" } ?? "nil") preset=\(model.settings.permissionPreset) log=\(model.settings.sessionLog) depth=\(model.settings.maxDepth) active=\(model.settings.maxActive) key=\(model.settings.apiKeyConfigured) account=\(model.settings.account) theme=\(model.appearance.themeIndex) grain=\(model.appearance.grain) mode=\(model.appearance.mode.rawValue)")
+            case "set":
+                // 写内核设置：depth=<n> active=<n> preset=<名> log=<true|false> effort=<档位>
+                let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { note("FAIL set 需要 键=值"); continue }
+                let settings = model.settings
+                switch parts[0] {
+                case "depth": await settings.setMaxDepth(Int(parts[1]) ?? settings.maxDepth)
+                case "active": await settings.setMaxActive(Int(parts[1]) ?? settings.maxActive)
+                case "preset": await settings.setPermission(parts[1])
+                case "log": await settings.setSessionLog(parts[1] == "true")
+                case "effort":
+                    if let current = settings.defaultModel, let choice = model.models.first(where: { $0.provider == current.provider && $0.model == current.model }) {
+                        await settings.setDefaultModel(choice, effort: parts[1])
+                    }
+                default: note("FAIL 未知设置 \(parts[0])")
+                }
+                await settings.load()
+                note("after set: model=\(settings.defaultModel.map { "\($0.model)/\($0.effort ?? "-")" } ?? "nil") preset=\(settings.permissionPreset) log=\(settings.sessionLog) depth=\(settings.maxDepth) active=\(settings.maxActive) error=\(settings.error ?? "-")")
+            case "theme":
+                if let index = Int(argument) { model.appearance.themeIndex = index }
+                try? await Task.sleep(for: .milliseconds(300))
             case "quit":
                 note("quit")
                 RunLoop.main.perform { NSApp.terminate(nil) }

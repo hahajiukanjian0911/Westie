@@ -67,13 +67,18 @@ final class AppModel {
     private var wantedConversations: Set<String> = []
 
     private var kernel: KernelProcess?
-    private var connection: KernelConnection?
+    private(set) var connection: KernelConnection?
     private var connectionTasks: [Task<Void, Never>] = []
     private var listRefresh: Task<Void, Never>?
     private let configuration: KernelConfiguration
 
+    /// Westie 自己的外观（UserDefaults）与写进内核的设置。
+    let appearance = AppearanceSettings()
+    let settings = SettingsModel()
+
     init(configuration: KernelConfiguration) {
         self.configuration = configuration
+        settings.app = self
     }
 
     // MARK: - 生命周期
@@ -184,6 +189,7 @@ final class AppModel {
         try await refreshSessions()
         try await loadModels()
         phase = .ready
+        Task { await settings.load() }
         conversations.values.forEach { $0.close() }
         conversations = [:]
         retainConversations(wantedConversations)
@@ -411,6 +417,11 @@ final class AppModel {
         defaultModel = models.first {
             $0.provider == fallback?["provider"]?.stringValue && $0.model == fallback?["model"]?.stringValue
         } ?? models.first
+    }
+
+    /// 改了默认模型、API Key 或账号后重读模型目录。
+    func reloadModels() async {
+        do { try await loadModels() } catch { report(error) }
     }
 
     // MARK: - 会话
