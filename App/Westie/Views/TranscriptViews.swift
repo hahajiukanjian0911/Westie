@@ -74,8 +74,8 @@ struct ProcessView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                // 亲手展开时不跟随到底：点的这一行留在原位，内容往下长
-                pauseFollowing()
+                // 亲手展开收起时不跟随到底：点的这一行留在原位，内容往下长或往上收
+                pauseFollowing(expanded)
                 withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
@@ -125,7 +125,7 @@ struct ProcessView: View {
         .onReceive(NotificationCenter.default.publisher(for: .westieToggleProcess)) { note in
             guard note.object == nil || note.object as? String == steps.first?.id else { return }
             trace("toggle process \(steps.first?.id ?? "")")
-            pauseFollowing()
+            pauseFollowing(expanded)
             withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
         }
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { old, new in
@@ -239,7 +239,7 @@ private struct ProcessStepRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                pauseFollowing()
+                pauseFollowing(open)
                 withAnimation(.smooth(duration: 0.22)) { open.toggle() }
             } label: {
                 HStack(spacing: 8) {
@@ -281,7 +281,7 @@ private struct ProcessStepRow: View {
         .onReceive(NotificationCenter.default.publisher(for: .westieToggleStep)) { note in
             guard note.object as? String == step.id else { return }
             trace("toggle step \(step.id)")
-            pauseFollowing()
+            pauseFollowing(open)
             withAnimation(.smooth(duration: 0.22)) { open.toggle() }
         }
         #endif
@@ -374,12 +374,12 @@ struct Reveal<Content: View>: View {
 }
 
 private struct PauseFollowingKey: EnvironmentKey {
-    static let defaultValue: @MainActor @Sendable () -> Void = {}
+    static let defaultValue: @MainActor @Sendable (_ collapsing: Bool) -> Void = { _ in }
 }
 
 extension EnvironmentValues {
-    /// 用户亲手展开或收起时调用：这次变高不跟随滚到底。
-    var pauseFollowing: @MainActor @Sendable () -> Void {
+    /// 用户亲手展开或收起时调用：这次变化不跟随滚到底；收起时还要在底部垫空白，免得滚动位置被回收。
+    var pauseFollowing: @MainActor @Sendable (_ collapsing: Bool) -> Void {
         get { self[PauseFollowingKey.self] }
         set { self[PauseFollowingKey.self] = newValue }
     }

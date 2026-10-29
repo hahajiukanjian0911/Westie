@@ -11,6 +11,12 @@ struct ConversationView: View {
     @State private var following = true
     @State private var atBottom = true
     @State private var offsetY: CGFloat = 0
+    /// 收起时在底部临时垫的空白：内容变短也不必回收滚动位置，点的那一行留在原处；往上翻时逐步收掉。
+    @State private var slack: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var slackGeometry = SlackGeometry(offset: 0, viewport: 0, content: 0)
+    /// 收起动画进行中不修剪空白：修剪若赶在收起生效前，位置照样会被回收。
+    @State private var slackHeld = false
     /// 原地等候（设计稿 2026-10-29-loading v1 方向 A）：200ms 还没到才出占位条；到了只淡入内容。
     @State private var placeholderShown = false
     @State private var revealed = false
@@ -37,6 +43,14 @@ struct ConversationView: View {
             blocks.append(.process(id: Transcript.processId(after: blocks.last), steps: []))
         }
         return blocks
+    }
+
+    /// 只留住让当前位置有效所需的那一截空白：看得见的部分；往上翻后就不需要了。
+    private func trimSlack() {
+        guard slack > 0, !slackHeld else { return }
+        let geometry = slackGeometry
+        let needed = max(0, geometry.offset + geometry.viewport - (geometry.content - slack))
+        if needed < slack { slack = needed }
     }
 
     /// 翻到离顶部不到 400pt（或内容不满一屏）时往前加载一页。
@@ -97,7 +111,7 @@ struct ConversationView: View {
                 .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
-                .padding(.bottom, 24)
+                .padding(.bottom, 24 + slack)
                 .frame(maxWidth: .infinity)
             }
             .scrollPosition($scrollPosition)
@@ -145,14 +159,30 @@ struct ConversationView: View {
                 scrollPosition.scrollTo(y: note.object as? CGFloat ?? 0)
             }
             #endif
-            .environment(\.pauseFollowing) {
+            .environment(\.pauseFollowing) { collapsing in
                 // 位置原本钉在“底部”时，内容变高会把上面的内容往上推；改钉在当前偏移，展开的东西往下长
                 following = false
                 scrollPosition.scrollTo(y: offsetY)
+                // 收起前先垫一屏空白，内容变短也不会回收滚动位置。展开收起动画进行中都不修剪：
+                // 动画中间帧的内容高度还没到位，这时把空白收掉，位置照样会被回收
+                if collapsing { slack += viewportHeight }
+                slackHeld = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    slackHeld = false
+                    trimSlack()
+                }
+            }
+            .onScrollGeometryChange(for: SlackGeometry.self) { geometry in
+                SlackGeometry(offset: geometry.contentOffset.y, viewport: geometry.containerSize.height, content: geometry.contentSize.height)
+            } action: { _, geometry in
+                viewportHeight = geometry.viewport
+                slackGeometry = geometry
+                trimSlack()
             }
             .onChange(of: conversation.transcript.items.last?.id) {
                 // 自己发出新消息时回到跟随。看末条换没换，不看条数：往前翻页只在前面加，末条不变
-                if case .user = conversation.transcript.items.last { following = true }
+                if case .user = conversation.transcript.items.last { following = true; slack = 0 }
             }
             .overlay(alignment: .bottom) {
                 if conversation.isLoading, placeholderShown {
@@ -191,6 +221,10 @@ struct ConversationView: View {
                 .frame(maxWidth: .infinity)
         }
     }
+}
+
+private struct SlackGeometry: Equatable {
+    var offset, viewport, content: CGFloat
 }
 
 /// 列表顶端：滚到这里就自动加载更早的消息；出错时给一个重试。
