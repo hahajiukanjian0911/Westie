@@ -95,12 +95,14 @@ struct Typography: Equatable, Sendable {
     var tracking: CGFloat = 0
     /// 代码的行高（字号的倍数）。
     var codeLineHeight: CGFloat = 1.55
-    /// 对话栏（消息与输入框）的最大宽度；拉到头是铺满整个窗口。
+    /// 对话栏（消息与输入框）的最大宽度；0 表示铺满整个窗口。
     var chatWidth: CGFloat = 760
 
-    static let chatWidths: ClosedRange<CGFloat> = 560...1240
-    /// 栏宽实际用的最大宽度：滑杆拉到头时不设上限。
-    var chatColumnWidth: CGFloat { chatWidth >= Self.chatWidths.upperBound ? .infinity : chatWidth }
+    /// 对话宽度四档（设计稿 `2026-10-29-chat-width/v2` 的 A）：名字、宽度（0 为铺满）、示意图里栏占的比例。
+    static let chatWidthOptions: [(name: String, width: CGFloat, fraction: CGFloat)] = [
+        ("窄", 640, 0.46), ("标准", 760, 0.58), ("宽", 960, 0.76), ("铺满", 0, 0.94),
+    ]
+    var chatColumnWidth: CGFloat { chatWidth <= 0 ? .infinity : chatWidth }
 
     static let chatSizes: ClosedRange<CGFloat> = 13...18
     static let codeSizes: ClosedRange<CGFloat> = 11...16

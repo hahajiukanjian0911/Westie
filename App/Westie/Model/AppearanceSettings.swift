@@ -151,6 +151,8 @@ final class AppearanceSettings {
         tracking = fonts["tracking"] as? Double ?? 0
         codeLineHeight = fonts["codeLineHeight"] as? Double ?? 1.55
         chatWidth = fonts["chatWidth"] as? Double ?? 760
+        // 早先的滑杆版本拉到头（1240）表示铺满
+        if chatWidth >= 1240 { chatWidth = 0 }
     }
 
     /// 浅深色落在 App 级 appearance 上（菜单、弹层一起变），不动系统设置。

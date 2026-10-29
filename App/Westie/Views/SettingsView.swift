@@ -376,6 +376,15 @@ private struct AppearancePage: View {
                 Toggle("颗粒质感", isOn: $appearance.grain).toggleStyle(.switch).labelsHidden().controlSize(.small)
             }
         }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("对话宽度").uiFont(12).foregroundStyle(palette.ink3).padding(.horizontal, 2)
+            HStack(spacing: 8) {
+                ForEach(Array(Typography.chatWidthOptions.enumerated()), id: \.offset) { _, option in
+                    WidthCard(name: option.name, width: option.width, fraction: option.fraction,
+                              selected: appearance.chatWidth == option.width) { appearance.chatWidth = option.width }
+                }
+            }
+        }
         FontSettings(appearance: appearance, expanded: $settings.fontsExpanded)
     }
 }
@@ -422,11 +431,6 @@ private struct FontSettings: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .fixedSize()
-                }
-                SettingsRow(label: "对话宽度") {
-                    ValueSlider(value: appearance.chatWidth, range: Typography.chatWidths, step: 20, format: {
-                        $0 >= Typography.chatWidths.upperBound ? "铺满" : "\(Int($0))"
-                    }) { appearance.chatWidth = $0 }
                 }
             }
             Button {
@@ -479,6 +483,60 @@ private struct FontSettings: View {
             ValueSlider(value: appearance.codeLineHeight, range: Typography.codeLineHeights, step: 0.05, format: { String(format: "%.2f", $0) }) { appearance.codeLineHeight = $0 }
         }
     }
+}
+
+/// 对话宽度卡片：小窗里画出对话栏的宽窄，点一张即换。
+private struct WidthCard: View {
+    let name: String
+    let width: CGFloat
+    let fraction: CGFloat
+    let selected: Bool
+    let action: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                GeometryReader { proxy in
+                    VStack(spacing: 4) {
+                        bar.frame(width: proxy.size.width * fraction * 0.4).frame(maxWidth: .infinity, alignment: .trailing)
+                            .foregroundStyle(palette.ink4)
+                        bar
+                        bar.frame(width: proxy.size.width * fraction * 0.7).frame(maxWidth: .infinity, alignment: .leading)
+                        bar
+                        Spacer(minLength: 0)
+                        RoundedRectangle(cornerRadius: 3).fill(palette.box)
+                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(palette.boxStroke, lineWidth: 0.5))
+                            .frame(height: 9)
+                    }
+                    .foregroundStyle(palette.ink5)
+                    .frame(width: proxy.size.width * fraction)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .animation(.easeOut(duration: 0.25), value: fraction)
+                }
+                .frame(height: 62)
+                .background(palette.code, in: .rect(cornerRadius: 6))
+                HStack {
+                    Text(name).foregroundStyle(palette.ink2)
+                    Spacer(minLength: 4)
+                    if width > 0 { Text("\(Int(width))").foregroundStyle(palette.ink4).monospacedDigit() }
+                }
+                .uiFont(12)
+            }
+            .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 9)
+            .background(palette.box, in: .rect(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? palette.accent : palette.boxStroke, lineWidth: selected ? 1.5 : 0.5))
+            .shadow(color: .black.opacity(hovering && !selected ? 0.06 : 0), radius: 4, y: 2)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: selected)
+    }
+
+    private var bar: some View { RoundedRectangle(cornerRadius: 2).frame(height: 4) }
 }
 
 /// 搭配卡片：用这组的对话字体写「Aa 汉字」，代码字体写「{ code }」。
