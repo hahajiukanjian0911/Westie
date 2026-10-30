@@ -82,13 +82,17 @@ final class AppModel {
 
     init(configuration: KernelConfiguration) {
         self.configuration = configuration
-        // 每个数据目录各记各的，mock 不会清掉真实配置的记录。
+        // 每个数据目录各记各的，mock 不会动真实配置的记录。
         touchedKey = "sessionList.touchedAt:" + configuration.location.dshHome.standardizedFileURL.path
-        let stored = UserDefaults.standard.dictionary(forKey: touchedKey) as? [String: Double]
-            ?? (configuration.sharesDSHHome ? UserDefaults.standard.dictionary(forKey: "sessionList.restoredAt") as? [String: Double] : nil)
-            ?? [:]
+        let defaults = UserDefaults.standard
+        if configuration.sharesDSHHome, defaults.object(forKey: touchedKey) == nil,
+           let legacy = defaults.dictionary(forKey: "sessionList.restoredAt") as? [String: Double] {
+            // 旧版的恢复时间先存进新键再删旧键
+            defaults.set(legacy, forKey: touchedKey)
+            defaults.removeObject(forKey: "sessionList.restoredAt")
+        }
+        let stored = defaults.dictionary(forKey: touchedKey) as? [String: Double] ?? [:]
         touchedAt = stored.mapValues { Date(timeIntervalSince1970: $0) }
-        UserDefaults.standard.removeObject(forKey: "sessionList.restoredAt")
         settings.app = self
     }
 
@@ -412,7 +416,7 @@ final class AppModel {
 
     // MARK: - 操作
 
-    /// 添加工作区；`thenNewSession` 时等它出现在工作区列表里后直接新建一个会话。
+    /// 添加工作区；`thenNewSession` 时用返回的工作区直接新建一个会话。
     func addWorkspace(path: String, thenNewSession: Bool = false) async {
         guard let connection else { return }
         do {
@@ -505,24 +509,37 @@ final class AppModel {
 
     /// 本次运行里改过名的会话（列表投影可能还是旧标题）。
     private var renamedTitles: [String: String] = [:]
+    /// 每个会话最近一次改名的序号：连着改两次时，只认最后一次的结果。
+    private var renameRevision: [String: Int] = [:]
 
-    func rename(_ sessionId: String, to title: String) async {
+    /// 改名；返回内核接受的标题（会去空白、截长），失败返回 nil。
+    @discardableResult
+    func rename(_ sessionId: String, to title: String) async -> String? {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let connection, !title.isEmpty, title != sessions[sessionId]?.title else { return }
-        let previous = sessions[sessionId]?.title
+        guard let connection, !title.isEmpty else { return nil }
+        guard title != sessions[sessionId]?.title else { return title }
+        let previousTitle = sessions[sessionId]?.title
+        let previousOverride = renamedTitles[sessionId]
+        let revision = (renameRevision[sessionId] ?? 0) + 1
+        renameRevision[sessionId] = revision
         sessions[sessionId]?.title = title
         renamedTitles[sessionId] = title
         do {
-            // 内核会把标题规整一遍（去空白、截长），以它返回的为准。
             let value = try await connection.call("session/rename", ["request": ["sessionId": .string(sessionId), "title": .string(title)]])
-            if let accepted = value["title"]?.stringValue {
+            let accepted = value["title"]?.stringValue ?? title
+            if renameRevision[sessionId] == revision {
                 renamedTitles[sessionId] = accepted
                 sessions[sessionId]?.title = accepted
             }
+            return accepted
         } catch {
-            renamedTitles[sessionId] = nil
-            sessions[sessionId]?.title = previous
-            report(error)
+            // 期间又改过名就不回退，交给后来那次
+            if renameRevision[sessionId] == revision {
+                renamedTitles[sessionId] = previousOverride
+                sessions[sessionId]?.title = previousTitle
+                report(error)
+            }
+            return nil
         }
     }
 

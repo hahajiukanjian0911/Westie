@@ -200,9 +200,12 @@ enum Automation {
                     note(done ? "pin \(id) pinned=\(model.isPinned(id))" : "FAIL pin \(id)")
                 default:
                     guard parts.count == 2 else { note("FAIL rename 要写成 rename:<n>=<新名字>"); continue }
-                    await model.rename(id, to: parts[1])
-                    let done = await until { model.sessions[id]?.title == parts[1] }
-                    note(done ? "renamed \(id) \(parts[1])" : "FAIL rename \(id) error=\(model.lastError ?? "-")")
+                    // 内核会规整标题，按它接受的结果核对
+                    if let accepted = await model.rename(id, to: parts[1]), model.sessions[id]?.title == accepted {
+                        note("renamed \(id) \(accepted)")
+                    } else {
+                        note("FAIL rename \(id) error=\(model.lastError ?? "-")")
+                    }
                 }
             case "unarchive":
                 guard let session = model.archivedSessions.first else { note("FAIL 归档是空的"); continue }

@@ -3,8 +3,8 @@ import Testing
 
 struct SessionListModelTests {
     @Test func defaultWorkspaceNeedsFullLocation() {
-        let real = Workspace(id: "a", path: "/Users/x/Documents/deepseek-harness/default-workspace", title: "default-workspace", sessionIds: [])
-        let lookalike = Workspace(id: "b", path: "/work/default-workspace", title: "default-workspace", sessionIds: [])
+        let real = Workspace(id: "a", path: Workspace.defaultPath, title: "default-workspace", sessionIds: [])
+        let lookalike = Workspace(id: "b", path: "/work/deepseek-harness/default-workspace", title: "default-workspace", sessionIds: [])
         let renamed = Workspace(id: "c", path: real.path, title: "随手记", sessionIds: [])
         #expect(real.isDefault && real.displayTitle == "无项目")
         #expect(!lookalike.isDefault && lookalike.displayTitle == "default-workspace")
@@ -18,11 +18,9 @@ struct SessionListModelTests {
         #expect(child.isSubagent)
     }
 
-    @Test func baselineMarksBoardReady() {
+    @Test func baselineKeepsPinOrder() {
         var board = WorkspaceBoard()
-        #expect(!board.hasBaseline)
         board.apply(["type": "baseline", "value": ["items": .array([]), "archivedSessionIds": .array([]), "pinnedSessionIds": .array(["s2", "s1"])]])
-        #expect(board.hasBaseline)
         #expect(board.pinnedSessionIds == ["s2", "s1"])
     }
 }

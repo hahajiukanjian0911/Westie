@@ -9,9 +9,14 @@ public struct Workspace: Sendable, Identifiable, Hashable {
     /// 内核首次启动时在「文稿」里建的默认工作区（`<Documents>/deepseek-harness/default-workspace`），界面上叫「无项目」。
     /// 只认这个完整位置，别处同名的文件夹是普通项目。
     public var isDefault: Bool {
-        let components = URL(filePath: path).standardizedFileURL.pathComponents
-        return components.suffix(2) == ["deepseek-harness", "default-workspace"]
+        URL(filePath: path).standardizedFileURL.path(percentEncoded: false) == Self.defaultPath
     }
+
+    public static let defaultPath: String = {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "Documents")
+        return documents.appending(path: "deepseek-harness/default-workspace").standardizedFileURL.path(percentEncoded: false)
+    }()
 
     /// 默认工作区没改过名才叫「无项目」，用户起的名字照用。
     public var displayTitle: String { isDefault && title == "default-workspace" ? "无项目" : title }
@@ -24,8 +29,6 @@ public struct WorkspaceBoard: Sendable, Equatable {
     public private(set) var archivedSessionIds: Set<String> = []
     /// 内核报的置顶顺序：最近置顶的在前。
     public private(set) var pinnedSessionIds: [String] = []
-    /// 收到过 baseline：在此之前归档、置顶都还不可信。
-    public private(set) var hasBaseline = false
 
     public init() {}
 
@@ -49,7 +52,6 @@ public struct WorkspaceBoard: Sendable, Equatable {
             }
             archivedSessionIds = Set(value["archivedSessionIds"]?.arrayValue?.compactMap(\.stringValue) ?? [])
             pinnedSessionIds = value["pinnedSessionIds"]?.arrayValue?.compactMap(\.stringValue) ?? []
-            hasBaseline = true
         case "upsert":
             if let workspace = frame["workspace"].flatMap(Self.decode) {
                 if workspaces[workspace.id] == nil, !order.contains(workspace.id) { order.append(workspace.id) }

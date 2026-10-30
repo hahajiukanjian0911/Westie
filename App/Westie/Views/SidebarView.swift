@@ -130,13 +130,9 @@ struct SidebarView: View {
             togglePin: { Task { await model.togglePin(session.id) } },
             rename: { title in Task { await model.rename(session.id, to: title) } },
             startRename: { renaming = session.id },
-            toggleChildren: {
-                withAnimation(reduceMotion ? nil : .spring(duration: 0.24)) {
-                    if expanded.contains(session.id) { expanded.remove(session.id) } else { expanded.insert(session.id) }
-                }
-            }
+            toggleChildren: { toggle(session.id) }
         )
-        .draggable(SessionDrag.payload(session.id)) {
+        .onDrag { SessionDrag.begin(session.id) } preview: {
             Text(session.displayTitle).uiFont(13).lineLimit(1)
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(palette.box, in: .rect(cornerRadius: Metrics.rowRadius))
@@ -148,7 +144,7 @@ struct SidebarView: View {
         ChildRow(session: child, selected: child.id == model.selectedSessionId,
                  pending: model.pendingCount(for: child.id)) { open(child.id) }
             .id(child.id)
-            .draggable(SessionDrag.payload(child.id))
+            .onDrag { SessionDrag.begin(child.id) }
             .contextMenu {
                 Button("在新窗口打开") { layout.openConversation(child.id, mode: .newWindow) }
                 Button("并排打开") { layout.openConversation(child.id, mode: .sideBySide) }
@@ -182,7 +178,13 @@ struct SidebarView: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(archived) { session in
-                            archivedRow(session, now: now)
+                            VStack(spacing: 2) {
+                                archivedRow(session, now: now)
+                                // 归档的父会话也能展开看它的子代理会话
+                                if expanded.contains(session.id) {
+                                    ForEach(model.children(of: session.id)) { childRow($0) }
+                                }
+                            }
                         }
                     }
                     .padding(.bottom, 8)
@@ -195,11 +197,14 @@ struct SidebarView: View {
         .frame(maxHeight: archiveOpen ? .infinity : nil)
     }
 
-    private func archivedRow(_ session: SessionSummary, now: Date) -> some View {
+    private func archivedRow(_ session: SessionSummary, now: Date, showsChildren: Bool = true) -> some View {
         ArchivedRow(session: session, workspace: model.workspace(for: session), lastActive: model.lastActive(session), now: now,
                     selected: session.id == model.selectedSessionId,
+                    children: showsChildren ? model.children(of: session.id).count : 0,
+                    expanded: expanded.contains(session.id),
                     open: { open(session.id) },
-                    restore: { restore(session.id) })
+                    restore: { restore(session.id) },
+                    toggleChildren: { toggle(session.id) })
             .contextMenu { menu(for: session, archived: true) }
     }
 
@@ -225,7 +230,7 @@ struct SidebarView: View {
                 if !archived.isEmpty {
                     groupLabel("已归档")
                     ForEach(archived) { session in
-                        archivedRow(session, now: now)
+                        archivedRow(session, now: now, showsChildren: false)
                     }
                 }
                 if contentHits == nil, model.contentSearchAvailable {
@@ -281,6 +286,12 @@ struct SidebarView: View {
         }
     }
 
+    private func toggle(_ id: String) {
+        withAnimation(reduceMotion ? nil : .spring(duration: 0.24)) {
+            if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+        }
+    }
+
     private func open(_ id: String) {
         model.selectedSessionId = id
         layout.openConversation(id)
@@ -308,10 +319,24 @@ struct SidebarView: View {
 
 /// 从侧栏拖出的会话：放到对话窗口上就在那里打开，放到右侧三分之一就并排打开。
 /// 拖的是带前缀的纯文本，不用另外登记文件类型；落点只认这个前缀。
+/// 拖动开始时记下是哪个会话：落点据此只接本 App 的会话拖动，普通文本照常交给输入框。
+@MainActor
 enum SessionDrag {
     static let prefix = "westie-session:"
+    private static var current: (sessionId: String, startedAt: Date)?
 
-    static func payload(_ sessionId: String) -> String { prefix + sessionId }
+    static func begin(_ sessionId: String) -> NSItemProvider {
+        current = (sessionId, Date())
+        return NSItemProvider(object: (prefix + sessionId) as NSString)
+    }
+
+    /// 正在拖的会话（拖动取消时没有回调，超过一分钟的记录视为过期）。
+    static var active: String? {
+        guard let current, Date().timeIntervalSince(current.startedAt) < 60 else { return nil }
+        return current.sessionId
+    }
+
+    static func end() { current = nil }
 
     static func sessionId(from text: String) -> String? {
         text.hasPrefix(prefix) ? String(text.dropFirst(prefix.count)) : nil
@@ -683,8 +708,11 @@ private struct ArchivedRow: View {
     let lastActive: Date
     let now: Date
     let selected: Bool
+    var children = 0
+    var expanded = false
     let open: () -> Void
     let restore: () -> Void
+    var toggleChildren: () -> Void = {}
     @Environment(\.palette) private var palette
     @State private var hovering = false
 
@@ -694,6 +722,21 @@ private struct ArchivedRow: View {
             Text(session.displayTitle).uiFont(12.5).lineLimit(1)
                 .foregroundStyle(selected || hovering ? palette.ink : palette.ink3)
             Spacer(minLength: 4)
+            if children > 0 {
+                Button(action: toggleChildren) {
+                    HStack(spacing: 2) {
+                        Text("\(children)").monospacedDigit()
+                        Image(systemName: "chevron.right").uiFont(7, .bold).rotationEffect(.degrees(expanded ? 90 : 0))
+                    }
+                    .uiFont(11)
+                    .foregroundStyle(palette.ink4)
+                    .padding(.horizontal, 3)
+                    .frame(height: 16)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("子代理会话")
+            }
             if hovering {
                 Button("恢复", systemImage: "arrow.uturn.backward", action: restore)
                     .labelStyle(.iconOnly)

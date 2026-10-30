@@ -225,10 +225,13 @@ private struct SessionDropDelegate: DropDelegate {
     @Binding var zone: Zone?
     let open: (String, Zone) -> Void
 
-    func validateDrop(info: DropInfo) -> Bool { accepts && info.hasItemsConforming(to: [.utf8PlainText]) }
+    /// 只接侧栏开始的会话拖动；别处拖来的文本不认领。
+    func validateDrop(info: DropInfo) -> Bool {
+        accepts && MainActor.assumeIsolated { SessionDrag.active != nil } && info.hasItemsConforming(to: [.utf8PlainText])
+    }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard accepts else { return DropProposal(operation: .forbidden) }
+        guard validateDrop(info: info) else { return nil }
         zone = info.location.x > width() * 2 / 3 ? .side : .here
         return DropProposal(operation: .move)
     }
@@ -238,7 +241,8 @@ private struct SessionDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         let target = zone ?? .here
         zone = nil
-        guard let provider = info.itemProviders(for: [.utf8PlainText]).first else { return false }
+        guard validateDrop(info: info), let provider = info.itemProviders(for: [.utf8PlainText]).first else { return false }
+        MainActor.assumeIsolated { SessionDrag.end() }
         _ = provider.loadObject(ofClass: NSString.self) { object, _ in
             guard let text = object as? String, let sessionId = SessionDrag.sessionId(from: text) else { return }
             Task { @MainActor in open(sessionId, target) }
@@ -299,6 +303,12 @@ private struct WindowTile: View {
             width: { layout.tileFrames[window.id]?.width ?? 0 },
             zone: $dropZone
         ) { sessionId, zone in
+            guard model.sessions[sessionId] != nil else { return }
+            // 一个会话只占一个窗口：它已经开在别处就先关掉那个窗口，再按落点打开
+            if let existing = layout.window(showing: sessionId) {
+                if existing == window.id { return }
+                layout.close(existing)
+            }
             layout.focus(window.id)
             model.selectedSessionId = sessionId
             layout.openConversation(sessionId, mode: zone == .side ? .sideBySide : .navigate)

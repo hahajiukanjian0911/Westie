@@ -51,8 +51,10 @@ struct ComposerView: View {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draft = ""
         Task {
-            // 没发出去（比如恢复归档失败）就把草稿放回来，除非这期间又输入了新内容。
-            if await !model.send(text, to: conversation.sessionId), draft.isEmpty { draft = text }
+            // 没发出去（比如恢复归档失败）就把原文放回输入框；期间又输入了内容就接在原文后面。
+            if await !model.send(text, to: conversation.sessionId) {
+                draft = draft.isEmpty ? text : text + "\n" + draft
+            }
         }
     }
 }

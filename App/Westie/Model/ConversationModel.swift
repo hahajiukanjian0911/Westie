@@ -8,7 +8,6 @@ final class ConversationModel {
     let sessionId: String
     /// 子 Agent 会话的父会话：内核要求带上它才肯读取，且这类会话只能查看。
     let parentSessionId: String?
-    var isReadOnly: Bool { parentSessionId != nil }
     private(set) var transcript = Transcript()
     private(set) var isLoading = true
     private(set) var hasEarlierHistory = false

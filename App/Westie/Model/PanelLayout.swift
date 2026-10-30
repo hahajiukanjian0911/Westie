@@ -173,6 +173,11 @@ final class PanelLayout {
         return nil
     }
 
+    /// 正在显示这个会话的窗口（不论哪个面板、是否收起）。
+    func window(showing sessionId: String) -> UUID? {
+        locate(.conversation(sessionId: sessionId))?.window.id
+    }
+
     private func locate(_ content: WindowContent) -> (panel: PanelID, window: PanelWindow)? {
         for panel in PanelID.allCases {
             if let window = state(panel).windows.first(where: { $0.content == content }) { return (panel, window) }
