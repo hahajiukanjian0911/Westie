@@ -8,7 +8,7 @@ import WestieKit
 /// （见 shared/skills/motion-pitfalls/patterns/scroll-anchor-loss.md）。这里偏移只在三种情况下变：
 /// 用户自己滚、跟随底部、加载更早历史时补偿新插入的高度。其余任何高度变化都不动偏移；
 /// 内容变短时文档高度至少留到“当前偏移 + 视口”，偏移不会被夹回，看着的东西就不会跳。
-struct ConversationScroll<Content: View>: NSViewRepresentable {
+struct ConversationScroll<Content: View & Equatable>: NSViewRepresentable {
     let scroller: ConversationScroller
     let content: Content
 
@@ -38,11 +38,15 @@ struct ConversationScroll<Content: View>: NSViewRepresentable {
         scrollView.contentView.postsFrameChangedNotifications = true
         scroller.attach(scrollView: scrollView, document: document)
         context.coordinator.hosting = hosting
+        context.coordinator.content = content
         return scrollView
     }
 
     func updateNSView(_ scrollView: ConversationScrollView, context: Context) {
         PerfTrace.count("hosting_update")
+        guard context.coordinator.content != content else { return }
+        context.coordinator.content = content
+        PerfTrace.count("hosting_root_replace")
         context.coordinator.hosting?.rootView = content
     }
 
@@ -55,11 +59,13 @@ struct ConversationScroll<Content: View>: NSViewRepresentable {
 
     @MainActor final class Coordinator {
         var hosting: NSHostingView<Content>?
+        var content: Content?
     }
 }
 
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+
 }
 
 /// 只多做一件事：分辨“用户自己在滚”，滚轮、触控板和拖滚动条都算。

@@ -135,9 +135,7 @@ struct ProcessView: View {
             pauseFollowing(expanded)
             withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
         }
-        .onGeometryChange(for: ProcessRowTrace.self) { ProcessRowTrace(id: steps.first?.id ?? "", y: $0.frame(in: .global).minY) } action: { old, new in
-            trace("process \(new.id) minY \(old.y) -> \(new.y)")
-        }
+        .modifier(ProcessGeometryTrace(kind: "process", id: steps.first?.id ?? ""))
         #endif
     }
 
@@ -308,9 +306,7 @@ private struct ProcessStepRow: View {
             pauseFollowing(open)
             withAnimation(.smooth(duration: 0.22)) { open.toggle() }
         }
-        .onGeometryChange(for: ProcessRowTrace.self) { ProcessRowTrace(id: step.id, y: $0.frame(in: .global).minY) } action: { old, new in
-            trace("step \(new.id) minY \(old.y) -> \(new.y)")
-        }
+        .modifier(ProcessGeometryTrace(kind: "step", id: step.id))
         #endif
     }
 
@@ -434,6 +430,24 @@ func trace(_ line: @autoclosure () -> String) {
 #endif
 
 #if DEBUG
+private struct ProcessGeometryTrace: ViewModifier {
+    let kind: String
+    let id: String
+    private static let enabled = ProcessInfo.processInfo.environment["WESTIE_TRACE"] != nil
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if Self.enabled {
+            content.onGeometryChange(for: ProcessRowTrace.self) {
+                ProcessRowTrace(id: id, y: $0.frame(in: .global).minY)
+            } action: { old, new in
+                trace("\(kind) \(new.id) minY \(old.y) -> \(new.y)")
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct ProcessRowTrace: Equatable {
     var id: String
     var y: CGFloat

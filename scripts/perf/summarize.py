@@ -54,7 +54,7 @@ for directory in sorted(root.iterdir()):
             if row.get('ms',0)>0:
                 add(f'{scenario}/{event}.deltas_per_sec',row['text_deltas']/(row['ms']/1000))
                 add(f'{scenario}/{event}.chars_per_sec',row.get('text_chars',0)/(row['ms']/1000))
-            for metric in ['markdown_parse','markdown_body_stream','conversation_body','hosting_update','conversation_content_body','markdown_timeline']:
+            for metric in ['markdown_parse','markdown_body_stream','conversation_body','hosting_update','conversation_content_body','conversation_history_body','conversation_block_body','history_anchor_resolve','hosting_root_replace','markdown_timeline']:
                 add(f'{scenario}/{event}.{metric}_per_delta',row.get(metric,0)/row['text_deltas'])
     add(f'{scenario}/observed_rss_max.mb',max((r.get('rss_mb',0) for r in rows),default=0))
 summary={k:{'n':len(v),'median':statistics.median(v),

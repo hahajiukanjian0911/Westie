@@ -86,7 +86,12 @@ enum Automation {
                 var page = 0
                 while conversation.hasEarlierHistory {
                     let start = PerfMonitor.snapshot()
+                    let identities = Dictionary(uniqueKeysWithValues: conversation.rows.map { ($0.id, ObjectIdentifier($0)) })
                     guard await conversation.loadEarlier() else { note("FAIL perfhistory \(conversation.earlierError ?? "no progress")"); break }
+                    let recreated = conversation.rows.filter { row in
+                        identities[row.id].map { $0 != ObjectIdentifier(row) } ?? false
+                    }.count
+                    if recreated > 0 { note("FAIL perfhistory recreated \(recreated) existing rows") }
                     await PerfMonitor.settle()
                     page += 1
                     PerfMonitor.finish("history_page_\(page)", since: start)

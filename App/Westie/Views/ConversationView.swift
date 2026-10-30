@@ -16,7 +16,7 @@ struct ConversationView: View {
     @State private var revealed = false
 
     private var running: Bool {
-        conversation.transcript.running || model.sessions[conversation.sessionId]?.running == true
+        conversation.running || model.sessions[conversation.sessionId]?.running == true
     }
 
     /// 往前加载一页；插入的高度由 scroller 补到偏移上，阅读位置不跳。
@@ -36,14 +36,8 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             ConversationScroll(
                 scroller: scroller,
-                content: ConversationContent(model: model, conversation: conversation, scroller: scroller, running: running, loadEarlier: loadEarlier)
-                    .opacity(revealed ? 1 : 0)
-                    .environment(\.palette, palette)
-                    .environment(\.typography, typography)
-                    .environment(\.pauseFollowing) { [scroller] _ in scroller.hold() }
-                    .font(typography.ui(13))
-                    .foregroundStyle(palette.ink)
-                    .tint(palette.accent)
+                content: ConversationHostedContent(model: model, conversation: conversation, scroller: scroller,
+                    revealed: revealed, palette: palette, typography: typography, themeIndex: model.appearance.themeIndex)
             )
             .onAppear {
                 scroller.onMetrics = { metrics in
@@ -58,9 +52,9 @@ struct ConversationView: View {
                 scroller.userScroll(to: note.object as? CGFloat ?? 0)
             }
             #endif
-            .onChange(of: conversation.transcript.items.last?.id) {
+            .onChange(of: conversation.lastItem?.id) {
                 // 自己发出新消息：这条消息顶到上方，之后回复长过一屏再跟随。看末条换没换，不看条数：往前翻页只在前面加
-                if case .user(let id, _) = conversation.transcript.items.last, revealed {
+                if case .user(let id, _) = conversation.lastItem, revealed {
                     scroller.sent(id)
                 }
             }
@@ -98,7 +92,7 @@ struct ConversationView: View {
                 if conversation.isLoading {
                 } else if let error = conversation.followError {
                     ContentUnavailableView("无法打开会话", systemImage: "exclamationmark.triangle", description: Text(error))
-                } else if conversation.transcript.items.isEmpty, conversation.transcript.live == nil, !running {
+                } else if conversation.rows.isEmpty, conversation.live == nil, !running {
                     Text("还没有消息").uiFont(10).foregroundStyle(palette.ink4)
                 }
             }
@@ -151,107 +145,171 @@ private struct ReadOnlyBar: View {
     }
 }
 
-/// 滚动区里的全部内容：从上往下排，量出内容底部和最后一条用户消息的位置交给 scroller。
+/// 宿主只在会话、显隐或外观改变时替换 rootView；模型由内部观察边界直接订阅。
+private struct ConversationHostedContent: View, Equatable {
+    let model: AppModel
+    let conversation: ConversationModel
+    let scroller: ConversationScroller
+    let revealed: Bool
+    let palette: Palette
+    let typography: Typography
+    let themeIndex: Int
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.model === rhs.model && lhs.conversation === rhs.conversation && lhs.scroller === rhs.scroller
+            && lhs.revealed == rhs.revealed && lhs.palette.dark == rhs.palette.dark
+            && lhs.typography == rhs.typography && lhs.themeIndex == rhs.themeIndex
+    }
+
+    var body: some View {
+        ConversationContent(model: model, conversation: conversation, scroller: scroller)
+            .opacity(revealed ? 1 : 0)
+            .environment(\.palette, palette)
+            .environment(\.typography, typography)
+            .environment(\.pauseFollowing) { [scroller] _ in scroller.hold() }
+            .font(typography.ui(13))
+            .foregroundStyle(palette.ink)
+            .tint(palette.accent)
+    }
+}
+
+private enum ConversationSpace {
+    static let name = "conversation"
+}
+
+/// 历史与 live 尾部各自观察；保留一次排完的非懒 VStack。
 private struct ConversationContent: View {
     @Environment(\.typography) private var typography
     let model: AppModel
     let conversation: ConversationModel
     let scroller: ConversationScroller
-    let running: Bool
-    let loadEarlier: () -> Void
-
-    private static let space = "conversation"
-
-    private var approvals: [PendingApproval] { model.approvals.filter { $0.sessionId == conversation.sessionId } }
-    private var questions: [PendingQuestion] { model.questions.filter { $0.sessionId == conversation.sessionId } }
-
-    private var lastUserId: String? {
-        conversation.transcript.items.last { if case .user = $0 { true } else { false } }?.id
-    }
-
-    /// 流式中的思考要归进最后一个过程块；前面没有过程块时先补一个空的，落盘后 id 不变。
-    private var displayBlocks: [Transcript.Block] {
-        var blocks = conversation.transcript.blocks
-        if let live = conversation.transcript.live, !live.reasoning.isEmpty, !endsWithProcess(blocks) {
-            blocks.append(.process(id: Transcript.processId(after: blocks.last), steps: []))
-        }
-        return blocks
-    }
-
-    private func endsWithProcess(_ blocks: [Transcript.Block]) -> Bool {
-        if case .process = blocks.last { true } else { false }
-    }
 
     var body: some View {
         let _ = PerfTrace.count("conversation_content_body")
         TopAligned {
-            column
+            VStack(alignment: .leading, spacing: 16) {
+                if conversation.hasEarlierHistory {
+                    EarlierHistoryRow(conversation: conversation) { Task { await conversation.loadEarlier() } }
+                }
+                if !conversation.rows.isEmpty {
+                    ConversationHistory(model: model, conversation: conversation)
+                }
+                ConversationTail(model: model, conversation: conversation)
+            }
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: ConversationMeasurements.self, value: ConversationGeometry(
+                        end: proxy.frame(in: .named(ConversationSpace.name)).minY + proxy.size.height,
+                        firstSeq: nil, lastUserId: nil, rows: [:]))
+                }
+            }
+            .onPreferenceChange(ConversationMeasurements.self) { value in
+                scroller.layoutChanged(value)
+            }
+            .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity)
         }
-        .coordinateSpace(.named(Self.space))
+        .coordinateSpace(.named(ConversationSpace.name))
     }
+}
 
-    private var column: some View {
-        // 与本次渲染的行身份一同捕获，偏好回调执行时不读取可能已经更新的下一份 transcript。
-        let blocks = displayBlocks
-        let firstSeq = conversation.transcript.firstSeq
-        let measuredLastUserId = lastUserId
-        return VStack(alignment: .leading, spacing: 16) {
-            if conversation.hasEarlierHistory {
-                EarlierHistoryRow(conversation: conversation, load: loadEarlier)
-            }
-            let previous = Dictionary(zip(blocks.dropFirst().map(\.id), blocks.map(\.id)), uniquingKeysWith: { first, _ in first })
-            ForEach(blocks) { block in
-                Group {
-                    switch block {
-                    case .item(let item):
-                        TranscriptItemView(item: item)
-                    case .process(let id, let steps):
-                        let trailing = id == blocks.last?.id
-                        let transcript = conversation.transcript
-                        let span = transcript.span(of: steps, after: previous[id])
-                        ProcessView(
-                            steps: steps,
-                            liveReasoning: trailing ? transcript.live?.reasoning : nil,
-                            active: trailing && running && transcript.live?.text.isEmpty != false,
-                            duration: span.map { $0.end.timeIntervalSince($0.start) },
-                            times: transcript.times
-                        )
-                    }
-                }
-                .anchorPreference(key: ConversationRowAnchors.self, value: .bounds) { [block.id: $0] }
-            }
-            if let live = conversation.transcript.live {
-                LiveMessageView(live: live)
-            } else if running, approvals.isEmpty, questions.isEmpty, !endsWithProcess(blocks) {
-                ProgressView().controlSize(.small).padding(.leading, 2)
-            }
-            ForEach(approvals) { approval in
-                ApprovalCard(approval: approval) { allow in
-                    Task { await model.answer(approval, allow: allow) }
-                }
-            }
-            ForEach(questions) { question in
-                QuestionCard(question: question) { selections, custom in
-                    Task { await model.answer(question, selections: selections, custom: custom) }
-                }
+/// live 文本变高时，这个区域的尺寸和历史锚点不变，无须重新解析整树坐标。
+private struct ConversationHistory: View {
+    let model: AppModel
+    let conversation: ConversationModel
+
+    var body: some View {
+        let _ = PerfTrace.count("conversation_history_body")
+        let firstSeq = conversation.firstSeq
+        let lastUserId = conversation.lastUserId
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(conversation.rows) { row in
+                ConversationBlockView(row: row, model: model, conversation: conversation)
+                    .anchorPreference(key: ConversationRowAnchors.self, value: .bounds) { [row.id: $0] }
             }
         }
         .backgroundPreferenceValue(ConversationRowAnchors.self) { anchors in
             GeometryReader { proxy in
-                let origin = proxy.frame(in: .named(Self.space)).minY
-                let measurement = ConversationGeometry(
-                    end: origin + proxy.size.height,
-                    firstSeq: firstSeq,
-                    lastUserId: measuredLastUserId,
-                    rows: anchors.mapValues { origin + proxy[$0].minY }
-                )
-                Color.clear.onChange(of: measurement, initial: true) { _, value in scroller.layoutChanged(value) }
+                let origin = proxy.frame(in: .named(ConversationSpace.name)).minY
+                let _ = PerfTrace.count("history_anchor_resolve")
+                Color.clear.preference(key: ConversationMeasurements.self, value: ConversationGeometry(
+                    end: 0, firstSeq: firstSeq, lastUserId: lastUserId,
+                    rows: anchors.mapValues { origin + proxy[$0].minY }))
             }
         }
-        .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
-        .padding(.horizontal, 24)
-        .padding(.top, 8)
-        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ConversationBlockView: View {
+    let row: ConversationRow
+    let model: AppModel
+    let conversation: ConversationModel
+
+    var body: some View {
+        let _ = PerfTrace.count("conversation_block_body")
+        let content = row.content
+        switch content.block {
+        case .item(let item):
+            TranscriptItemView(item: item)
+        case .process(_, let steps):
+            ConversationProcess(steps: steps, times: content.times, duration: content.duration,
+                                trailing: content.trailing, model: model, conversation: conversation)
+        }
+    }
+}
+
+private struct ConversationProcess: View {
+    let steps: [Transcript.Item]
+    let times: [String: Date]
+    let duration: TimeInterval?
+    let trailing: Bool
+    let model: AppModel
+    let conversation: ConversationModel
+
+    var body: some View {
+        let live = trailing ? conversation.live : nil
+        let active = trailing && (conversation.running || model.sessions[conversation.sessionId]?.running == true)
+        ProcessView(steps: steps, liveReasoning: live?.reasoning,
+                    active: active && live?.text.isEmpty != false, duration: duration, times: times)
+    }
+}
+
+private struct ConversationTail: View {
+    let model: AppModel
+    let conversation: ConversationModel
+
+    var body: some View {
+        let approvals = model.approvals.filter { $0.sessionId == conversation.sessionId }
+        let questions = model.questions.filter { $0.sessionId == conversation.sessionId }
+        let running = conversation.running || model.sessions[conversation.sessionId]?.running == true
+        if let live = conversation.live {
+            LiveMessageView(live: live)
+        } else if running, approvals.isEmpty, questions.isEmpty, conversation.rows.last?.isProcess != true {
+            ProgressView().controlSize(.small).padding(.leading, 2)
+        }
+        ForEach(approvals) { approval in
+            ApprovalCard(approval: approval) { allow in Task { await model.answer(approval, allow: allow) } }
+        }
+        ForEach(questions) { question in
+            QuestionCard(question: question) { selections, custom in
+                Task { await model.answer(question, selections: selections, custom: custom) }
+            }
+        }
+    }
+}
+
+/// 同一轮 preference 里提交历史坐标和尾部底边，分页补偿不混入尾部增长。
+private struct ConversationMeasurements: PreferenceKey {
+    static var defaultValue: ConversationGeometry { ConversationGeometry(end: 0, firstSeq: nil, lastUserId: nil, rows: [:]) }
+
+    static func reduce(value: inout ConversationGeometry, nextValue: () -> ConversationGeometry) {
+        let next = nextValue()
+        value.end = max(value.end, next.end)
+        if let firstSeq = next.firstSeq { value.firstSeq = firstSeq }
+        if let lastUserId = next.lastUserId { value.lastUserId = lastUserId }
+        value.rows.merge(next.rows, uniquingKeysWith: { _, latest in latest })
     }
 }
 
