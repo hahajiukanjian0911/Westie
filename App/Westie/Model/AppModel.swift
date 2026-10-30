@@ -76,22 +76,15 @@ final class AppModel {
     private var listRefresh: Task<Void, Never>?
     private let configuration: KernelConfiguration
 
-    /// Westie 自己的外观（UserDefaults）与写进内核的设置。
+    /// Westie 自己的外观（settings.json）与写进内核的设置。
     let appearance = AppearanceSettings()
     let settings = SettingsModel()
 
     init(configuration: KernelConfiguration) {
         self.configuration = configuration
         // 每个数据目录各记各的，mock 不会动真实配置的记录。
-        touchedKey = "sessionList.touchedAt:" + configuration.location.dshHome.standardizedFileURL.path
-        let defaults = UserDefaults.standard
-        if configuration.sharesDSHHome, defaults.object(forKey: touchedKey) == nil,
-           let legacy = defaults.dictionary(forKey: "sessionList.restoredAt") as? [String: Double] {
-            // 旧版的恢复时间先存进新键再删旧键
-            defaults.set(legacy, forKey: touchedKey)
-            defaults.removeObject(forKey: "sessionList.restoredAt")
-        }
-        let stored = defaults.dictionary(forKey: touchedKey) as? [String: Double] ?? [:]
+        touchedKey = "sessionTouchedAt" + (configuration.dataScope.map { ":\($0)" } ?? "")
+        let stored = ConfigStore.shared[touchedKey] as? [String: Double] ?? [:]
         touchedAt = stored.mapValues { Date(timeIntervalSince1970: $0) }
         settings.app = self
     }
@@ -458,7 +451,7 @@ final class AppModel {
     }
 
     private func saveTouched() {
-        UserDefaults.standard.set(touchedAt.mapValues(\.timeIntervalSince1970), forKey: touchedKey)
+        ConfigStore.shared[touchedKey] = touchedAt.mapValues(\.timeIntervalSince1970)
     }
 
     /// 手动归档：内核会顺带取消置顶。

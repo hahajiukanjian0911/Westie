@@ -34,21 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor let model = AppModel(configuration: AppDelegate.configuration)
 
-    /// 自动化测试用单独的存储，不动日常使用的面板布局。
-    @MainActor let layout: PanelLayout = {
-        guard ProcessInfo.processInfo.environment["WESTIE_AUTOMATION"] != nil,
-              let defaults = UserDefaults(suiteName: "com.hahajiukanjian.westie.automation")
-        else { return PanelLayout(dataScope: AppDelegate.layoutScope) }
-        if ProcessInfo.processInfo.environment["WESTIE_LAYOUT_KEEP"] == nil {
-            defaults.removePersistentDomain(forName: "com.hahajiukanjian.westie.automation")
-        }
-        return PanelLayout(defaults: defaults, dataScope: AppDelegate.layoutScope)
-    }()
-
-    /// 真实 `~/.dsh` 不加后缀（保留已有布局），其他数据目录按路径区分。
-    private static var layoutScope: String? {
-        configuration.sharesDSHHome ? nil : configuration.location.dshHome.standardizedFileURL.path
-    }
+    /// 自动化测试的布局存在单独的配置文件里（见 `ConfigStore.shared`），不动日常使用的面板布局。
+    @MainActor let layout = PanelLayout(dataScope: AppDelegate.configuration.dataScope)
 
     /// 等内核排空持久化后再退出（KernelProcess.stop 最多等 5 秒）。
     /// 收尾不走主 actor，答复也不走主队列：AppKit 在嵌套事件循环里等答复，若 terminate 正是从

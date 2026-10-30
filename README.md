@@ -14,13 +14,13 @@ DeepSeek Harness（DSH）的原生 macOS 客户端：沿用 DSH 内核，界面�
 | `Packages/Textual` | Textual 0.5.0 的副本，打了流式出字所需的小补丁（见 `PATCHES.md`） |
 | `scripts/` | 开发工具：`kernel.sh` 单独起内核、`probe.mjs` 链路探针、`mock-llm.mjs` 假模型、`dump-remote.mjs` 导出接口描述符 |
 
-界面由五个平级的面板组成：顶部、主边栏、对话、侧边栏、底部（`PanelLayout`、`Workbench`）。面板只管位置、尺寸和收起；内容是窗口，一个面板里的窗口可以并排显示或收着，窗口能拖到别的面板。布局保存在 UserDefaults，不写 `~/.dsh`；按数据目录分开保存（真实 `~/.dsh` 沿用 `Westie.panelLayout.v1`，其他目录在键后加路径），不会把一份数据里的会话窗口恢复到另一份里。
+界面由五个平级的面板组成：顶部、主边栏、对话、侧边栏、底部（`PanelLayout`、`Workbench`）。面板只管位置、尺寸和收起；内容是窗口，一个面板里的窗口可以并排显示或收着，窗口能拖到别的面板。布局保存在 `~/.config/westie/settings.json`；按数据目录分开保存（默认数据目录用 `panelLayout`，其他目录在键后加路径），不会把一份数据里的会话窗口恢复到另一份里。
 
 拖放规则：拖动时布局不动，只有一张小卡跟着指针，落点浮出松手后的样子。外框最外一圈（24pt，停 150ms）打开那条边上没显示的面板；窗口卡片的前三成或后三成表示并排插在它前面或后面，正中间表示叠进去；指针到对话面板上沿会浮出五格布局条。标题栏的布局按钮弹出同一张五格图，不拖也能移。窗口移走后，如果原面板空了、还有收着的窗口，就原地列出它们供补位。对话面板里的窗口全收着时也一直这样列出。指针靠近窗口顶部正中会浮出一根拖动条，拖它或标题栏空白处移动窗口，拖动中按 Esc 取消。系统自动拖动 App 已关掉，只有外框露出的地方能拖 App（双击按系统设置缩放）。
 
 会话列表不按工作区分组：进行中的会话按最近活动排成一列，每行上层是工作区标识与时间或状态，子 Agent 会话收在父会话下。置顶的会话排在最前。手动归档的会话（用内核的 `workspace/archiveSession`，与 DSH.app 共享）收在底部「归档」，不会自动归档；恢复或在里面发消息就回到列表。⌘N 弹出面板选工作区新建会话，「添加工作区…」也在这里。
 
-设置是工作台里的一张卡片：⌘, 或侧栏底部「设置」在对话面板里打开。通用、账号、高级写进内核（`settings/update`、`credentials/*`、`account/*`）；外观（浅深色、主题、颗粒质感、对话宽度、字体）是 Westie 自己的，存在 UserDefaults。字体分界面、对话、代码三类（`Typography`）：西文字体打底，中文字体挂在 cascade list 上；字体页有四组搭配、一根字号滑杆、行距三档，展开后逐项改字体、字号、行高、段距、字距和代码行高。外观页另有「对话宽度」四档（窄、标准、宽、铺满），调消息与输入框的最大宽度，换字体搭配时保持不变；旧滑杆的中间宽度吸附到最近一档，≥1240 的旧值迁移为铺满（0）。字号与间距读写时按控件范围钳制，非有限数值回到默认值。
+设置是工作台里的一张卡片：⌘, 或侧栏底部「设置」在对话面板里打开。通用、账号、高级写进内核（`settings/update`、`credentials/*`、`account/*`）；外观（浅深色、主题、颗粒质感、对话宽度、字体）是 Westie 自己的，存在 `~/.config/westie/settings.json`（旧版存在 UserDefaults 的外观首次启动时搬过来）。字体分界面、对话、代码三类（`Typography`）：西文字体打底，中文字体挂在 cascade list 上；字体页有四组搭配、一根字号滑杆、行距三档，展开后逐项改字体、字号、行高、段距、字距和代码行高。外观页另有「对话宽度」四档（窄、标准、宽、铺满），调消息与输入框的最大宽度，换字体搭配时保持不变；旧滑杆的中间宽度吸附到最近一档，≥1240 的旧值迁移为铺满（0）。字号与间距读写时按控件范围钳制，非有限数值回到默认值。
 
 App 启动时拉起内核（Node 子进程，profile `westie`），用启动令牌经 `/connect` 接入，一元调用走 `POST /api/<方法>`，流走 WebSocket `/api/remote.mux`。
 
@@ -34,13 +34,11 @@ xcodebuild -scheme Westie -derivedDataPath temp/DerivedData build
 
 ## 数据
 
-默认与 DSH 共用 `~/.dsh`：会话、工作区、登录凭据都沿用，Westie 只在其中新增 `profiles/westie`。内核锁定为与 DSH.app 相同的版本，存储相关代码逐字节一致，写入格式不会被升级。
+Westie 的配置与数据都在 `~/.config/westie`（`WESTIE_CONFIG_HOME` 可另指），不读写 DSH.app 的 `~/.dsh`：`settings.json` 是 Westie 自己的设置，`dsh/` 是自带内核的 DSH_HOME（会话、工作区、登录凭据、`profiles/westie`）。以后接入别的 Agent 内核各占一个子目录。
 
-`storages/workspace.json` 没有跨进程写锁，两个内核同时运行会互相覆盖，所以 Westie 与 DSH.app 互斥：DSH.app 在运行时 Westie 不启动内核并等待它退出；Westie 运行中 DSH.app 启动，Westie 立即停掉自己的内核让位。
+与 DSH.app 数据分开，两者可以同时运行。`WESTIE_DSH_HOME=<目录>` 可改用别的数据目录；若指回 `~/.dsh`，因为 `storages/workspace.json` 没有跨进程写锁，Westie 会与 DSH.app 互斥（DSH.app 在运行时不启动内核并等它退出，DSH.app 启动时立即停掉自己的内核让位）。
 
-`WESTIE_DSH_HOME=<目录>` 可改用别的数据目录（不与 DSH.app 互斥）。
-
-测试用本地假模型，数据在 `temp/dsh-home`，并清除所有 `*_API_KEY`，不会碰 `~/.dsh`、不会发出真实模型请求：
+测试用本地假模型，数据在 `temp/dsh-home`，并清除所有 `*_API_KEY`，不会碰真实数据、不会发出真实模型请求：
 
 ```sh
 node scripts/mock-llm.mjs 3190 &

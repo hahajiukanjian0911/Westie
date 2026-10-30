@@ -2,7 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Westie 自己的外观：浅深色、主题、颗粒质感、字体。只存在 UserDefaults，不写 `~/.dsh`。
+/// Westie 自己的外观：浅深色、主题、颗粒质感、字体。存在 `~/.config/westie/settings.json`（`ConfigStore`），不写内核数据。
 /// 主题沿用外观设置 v2 的六个预设（`deliverables/Westie/reviews/2026-10-27-appearance-settings/v2/source/themes.js`）。
 @MainActor @Observable
 final class AppearanceSettings {
@@ -156,20 +156,12 @@ final class AppearanceSettings {
 
     var theme: Theme { Self.themes[min(max(themeIndex, 0), Self.themes.count - 1)] }
 
-    @ObservationIgnored private let defaults: UserDefaults
-    private static let key = "Westie.appearance.v1"
+    @ObservationIgnored private let store: ConfigStore
+    nonisolated static let key = "appearance"
 
-    /// 自动化测试用单独的存储（与面板布局同一个 suite），不动日常使用的外观。
-    private static var storage: UserDefaults {
-        guard ProcessInfo.processInfo.environment["WESTIE_AUTOMATION"] != nil,
-              let suite = UserDefaults(suiteName: "com.hahajiukanjian.westie.automation")
-        else { return .standard }
-        return suite
-    }
-
-    init(defaults: UserDefaults = AppearanceSettings.storage) {
-        self.defaults = defaults
-        let saved = defaults.dictionary(forKey: Self.key) ?? [:]
+    init(store: ConfigStore = .shared) {
+        self.store = store
+        let saved = store[Self.key] as? [String: Any] ?? [:]
         mode = (saved["mode"] as? String).flatMap(Mode.init) ?? .system
         themeIndex = saved["theme"] as? Int ?? 0
         grain = saved["grain"] as? Bool ?? true
@@ -218,6 +210,6 @@ final class AppearanceSettings {
             "chatSize": chatSize, "code": codeFont, "codeSize": codeSize,
             "lineHeight": lineHeight, "paragraphSpacing": paragraphSpacing, "tracking": tracking, "codeLineHeight": codeLineHeight, "chatWidth": chatWidth,
         ]
-        defaults.set(["mode": mode.rawValue, "theme": themeIndex, "grain": grain, "fonts": fonts], forKey: Self.key)
+        store[Self.key] = ["mode": mode.rawValue, "theme": themeIndex, "grain": grain, "fonts": fonts]
     }
 }

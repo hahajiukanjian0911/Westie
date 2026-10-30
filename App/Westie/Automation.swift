@@ -20,7 +20,7 @@ import WestieKit
 ///      `font:<项>=<值>`（改字体、字号、行高等，`preset=<序号>` 换搭配，`expand=true` 展开逐项自定义；项见下方 font 分支）
 ///      `modelpicker:<png 路径>`（离屏渲染输入框的模型弹层）
 ///
-/// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实 `~/.dsh` 时只能
+/// 只有假模型模式（`WESTIE_MOCK_LLM`）允许会写数据或发消息的步骤；连真实数据时只能
 /// 选会话、截图、核对，任何会建会话、发消息、答复审批的步骤都拒绝执行。
 @MainActor
 enum Automation {

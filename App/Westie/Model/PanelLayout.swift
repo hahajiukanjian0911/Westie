@@ -89,7 +89,7 @@ struct WindowDrag: Equatable {
     }
 }
 
-/// 一个 Westie 窗口的面板布局：哪个窗口在哪个面板、谁并排显示、谁收着、各面板多大。保存在 UserDefaults。
+/// 一个 Westie 窗口的面板布局：哪个窗口在哪个面板、谁并排显示、谁收着、各面板多大。保存在 `settings.json`（`ConfigStore`）。
 @MainActor @Observable
 final class PanelLayout {
     private(set) var panels: [PanelID: PanelState]
@@ -110,10 +110,10 @@ final class PanelLayout {
     @ObservationIgnored var bounds: CGRect = .zero
     /// 最近聚焦的对话窗口：在会话列表里点会话时，在它里面打开。
     @ObservationIgnored private var lastConversationWindowId: UUID?
-    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let store: ConfigStore
     @ObservationIgnored private var dwellTask: Task<Void, Never>?
 
-    /// 布局里的对话窗口指向某份数据里的会话，所以按数据目录分开保存：真实 `~/.dsh` 沿用原来的键，
+    /// 布局里的对话窗口指向某份数据里的会话，所以按数据目录分开保存：默认的 `~/.config/westie/dsh` 用 `panelLayout`，
     /// 假模型或另指的测试数据各用各的，互相恢复不出对方的会话窗口。
     @ObservationIgnored private let storageKey: String
 
@@ -122,10 +122,10 @@ final class PanelLayout {
         var focused: UUID?
     }
 
-    init(defaults: UserDefaults = .standard, dataScope: String? = nil) {
-        self.defaults = defaults
-        storageKey = "Westie.panelLayout.v1" + (dataScope.map { ".\($0)" } ?? "")
-        let saved = defaults.data(forKey: storageKey).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
+    init(store: ConfigStore = .shared, dataScope: String? = nil) {
+        self.store = store
+        storageKey = "panelLayout" + (dataScope.map { ":\($0)" } ?? "")
+        let saved = store.data(forKey: storageKey).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
         var panels = saved?.panels ?? Self.defaultPanels
         for id in PanelID.allCases where panels[id] == nil { panels[id] = Self.defaultPanels[id] }
         self.panels = panels
@@ -568,6 +568,6 @@ final class PanelLayout {
 
     func save() {
         guard let data = try? JSONEncoder().encode(Saved(panels: panels, focused: focusedWindowId)) else { return }
-        defaults.set(data, forKey: storageKey)
+        store.set(data: data, forKey: storageKey)
     }
 }
