@@ -397,6 +397,18 @@ private struct WindowTile: View {
     private var title: some View {
         let hidden = layout.hiddenWindows(in: panel)
         let label = HStack(spacing: 2) {
+            // 会话窗口：工作区标识与名字 / 会话标题，工作区一层退到 ink3，标题仍是主角
+            if case .conversation(let id) = window.content, let session = model.sessions[id],
+               let workspace = model.workspace(for: session) {
+                HStack(spacing: 6) {
+                    WorkspaceMark(workspace: workspace)
+                    Text(workspace.displayTitle).fontWeight(.regular).foregroundStyle(palette.ink3)
+                    Text("/").fontWeight(.regular).foregroundStyle(palette.ink4).padding(.horizontal, 2)
+                }
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.trailing, 6)
+            }
             Text(window.content.title(model: model))
                 .lineLimit(1)
             if !hidden.isEmpty {
