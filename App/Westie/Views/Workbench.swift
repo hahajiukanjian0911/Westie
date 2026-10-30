@@ -392,10 +392,8 @@ private struct WindowTile: View {
         return nearGrip || layout.drag?.windowId == window.id
     }
 
-    /// 面板里有收着的窗口时，标题变成切换菜单（带一个小箭头）。
     @ViewBuilder
     private var title: some View {
-        let hidden = layout.hiddenWindows(in: panel)
         let label = HStack(spacing: 2) {
             // 会话窗口：工作区标识与名字 / 会话标题，工作区一层退到 ink3，标题仍是主角
             if case .conversation(let id) = window.content, let session = model.sessions[id],
@@ -411,40 +409,12 @@ private struct WindowTile: View {
             }
             Text(window.content.title(model: model))
                 .lineLimit(1)
-            if !hidden.isEmpty {
-                Image(systemName: "chevron.down")
-                    .uiFont(9, .semibold)
-                    .foregroundStyle(palette.ink3)
-            }
         }
         .uiFont(13, .semibold)
         .foregroundStyle(focused ? palette.ink : palette.ink2)
 
-        if hidden.isEmpty {
-            label
-        } else {
-            Menu {
-                Section("切换到") {
-                    ForEach(hidden) { other in
-                        Button(other.content.title(model: model)) { layout.reveal(other.id) }
-                    }
-                }
-                Section("并排显示") {
-                    ForEach(hidden) { other in
-                        Button(other.content.title(model: model), systemImage: "rectangle.split.2x1") {
-                            layout.showSideBySide(other.id)
-                        }
-                    }
-                }
-            } label: {
-                label
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("切换窗口")
-        }
+        // 收着的窗口切换菜单暂时关掉：标题只显示，不弹菜单
+        label
     }
 
     @ViewBuilder
