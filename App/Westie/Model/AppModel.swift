@@ -171,7 +171,6 @@ final class AppModel {
     /// 退出前：停掉长连任务并交出连接与内核，由调用方在主 actor 之外结束它们。
     func prepareShutdown() -> (connection: KernelConnection?, kernel: KernelProcess?) {
         phase = .failed("正在退出")
-        autoArchiveTask?.cancel()
         connectionTasks.forEach { $0.cancel() }
         connectionTasks = []
         conversations.values.forEach { $0.close() }
@@ -201,7 +200,6 @@ final class AppModel {
         try await refreshSessions()
         try await loadModels()
         phase = .ready
-        startAutoArchive()
         Task { await settings.load() }
         conversations.values.forEach { $0.close() }
         conversations = [:]
@@ -247,6 +245,12 @@ final class AppModel {
         // 列表里的标题来自缓存投影，改名后一段时间里新旧标题会交替出现：本次运行里改过的以本地为准。
         for (id, title) in renamedTitles { next[id]?.title = title }
         sessions = next
+        // 已删除的会话、内核时间已经更新过的记录不用再记。
+        let kept = touchedAt.filter { id, date in next[id].map { $0.updatedAt < date } ?? false }
+        if kept.count != touchedAt.count {
+            touchedAt = kept
+            saveTouched()
+        }
     }
 
     /// 会话状态变化后合并刷新一次列表（标题等投影在回合结束后更新）。
@@ -440,18 +444,9 @@ final class AppModel {
 
     // MARK: - 归档
 
-    /// 闲置这么久的会话自动归档（设计稿 2026-10-29-session-list v1）。
-    static let autoArchiveAfter: TimeInterval = {
-        #if DEBUG
-        // 测试用：`WESTIE_AUTO_ARCHIVE_SECONDS` 缩短闲置时间
-        if let value = ProcessInfo.processInfo.environment["WESTIE_AUTO_ARCHIVE_SECONDS"].flatMap(Double.init) { return value }
-        #endif
-        return 3 * 24 * 3600
-    }()
-    /// 本机看到的最近动静（运行开始、结束，从归档恢复），补内核 updatedAt 只记用户消息的不足。
+    /// 本机看到的最近动静（运行开始、结束，从归档恢复），补内核 updatedAt 只记用户消息的不足；只用来排序。
     private(set) var touchedAt: [String: Date] = [:]
     private let touchedKey: String
-    private var autoArchiveTask: Task<Void, Never>?
 
     private func touch(_ sessionId: String) {
         touchedAt[sessionId] = Date()
@@ -462,17 +457,17 @@ final class AppModel {
         UserDefaults.standard.set(touchedAt.mapValues(\.timeIntervalSince1970), forKey: touchedKey)
     }
 
-    /// 手动归档：内核会顺带取消置顶。`quiet` 时被拒绝也不弹横幅（自动归档用）。
+    /// 手动归档：内核会顺带取消置顶。
     @discardableResult
-    func archive(_ sessionId: String, quiet: Bool = false) async -> Bool {
+    func archive(_ sessionId: String) async -> Bool {
         guard let connection else { return false }
         do {
             _ = try await connection.call("workspace/archiveSession", ["request": ["sessionId": .string(sessionId)]])
             return true
         } catch let failure as RemoteFailure where failure.code == "workspace/session-active" {
-            if !quiet { lastError = Self.activeMessage(failure.details?["activity"]) }
+            lastError = Self.activeMessage(failure.details?["activity"])
         } catch {
-            if !quiet { report(error) }
+            report(error)
         }
         return false
     }
@@ -486,7 +481,7 @@ final class AppModel {
         return "会话还在运行，暂时不能归档"
     }
 
-    /// 从归档恢复：成功后从现在起重新计闲置时间，排到时间线最上面。
+    /// 从归档恢复：成功后记一次动静，排到时间线最上面。
     @discardableResult
     func unarchive(_ sessionId: String) async -> Bool {
         guard let connection else { return false }
@@ -504,47 +499,6 @@ final class AppModel {
         guard let connection else { return }
         let method = isPinned(sessionId) ? "workspace/unpinSession" : "workspace/pinSession"
         do { _ = try await connection.call(method, ["request": ["sessionId": .string(sessionId)]]) } catch { report(error) }
-    }
-
-    /// 连上内核后每 10 分钟检查一次（见 `isStale`）。自动化脚本连真实数据时只读，不自动归档。
-    private func startAutoArchive() {
-        autoArchiveTask?.cancel()
-        let automation = ProcessInfo.processInfo.environment["WESTIE_AUTOMATION"] != nil
-        guard !automation || isMock else { return }
-        autoArchiveTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.autoArchive()
-                try? await Task.sleep(for: .seconds(600))
-            }
-        }
-    }
-
-    /// 闲置超过 3 天、没置顶、自己和子 Agent 都不在运行、没有待处理、不在显示的会话。
-    private func isStale(_ session: SessionSummary) -> Bool {
-        lastActive(session) < Date().addingTimeInterval(-Self.autoArchiveAfter)
-            && !session.blank && !session.isSubagent && !isPinned(session.id)
-            && !board.archivedSessionIds.contains(session.id)
-            && !isBusy(session) && pendingCountIncludingChildren(for: session.id) == 0
-            && !wantedConversations.contains(session.id)
-    }
-
-    private func autoArchive() async {
-        // 等工作区 baseline 到了再动手，否则置顶、归档都还不知道。
-        guard phase == .ready, board.hasBaseline, let connection else { return }
-        let candidates = timelineSessions.filter(isStale).map(\.id)
-        for id in candidates {
-            // 每次归档前按最新状态再核一遍：这一轮里用户可能刚打开、恢复、置顶了它，或连接已经换了。
-            guard !Task.isCancelled, phase == .ready, self.connection === connection else { return }
-            guard let session = sessions[id], isStale(session) else { continue }
-            await archive(id, quiet: true)
-        }
-        // 过了闲置期的记录不再起作用，已删除的会话也不用记。
-        let cutoff = Date().addingTimeInterval(-Self.autoArchiveAfter)
-        let kept = touchedAt.filter { $0.value >= cutoff && sessions[$0.key] != nil }
-        if kept.count != touchedAt.count {
-            touchedAt = kept
-            saveTouched()
-        }
     }
 
     // MARK: - 重命名、分叉、搜索

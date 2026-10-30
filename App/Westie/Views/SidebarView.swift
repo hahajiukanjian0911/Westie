@@ -3,7 +3,7 @@ import SwiftUI
 import WestieKit
 
 /// 会话列表窗口：直接坐在外框上（设计稿 2026-10-29-session-list v1、v2）。
-/// 置顶的会话排在最前，其余不分组、按最近活动排成一列，工作区是每行的标识；闲置的沉到底部「归档」。
+/// 置顶的会话排在最前，其余不分组、按最近活动排成一列，工作区是每行的标识；手动归档的收在底部「归档」。
 struct SidebarView: View {
     @Bindable var model: AppModel
     let layout: PanelLayout
