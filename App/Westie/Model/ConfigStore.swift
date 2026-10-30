@@ -34,7 +34,8 @@ final class ConfigStore: @unchecked Sendable {
             store.importLegacyAppearance()
             return store
         }
-        let file = environment["WESTIE_PERF_LOG"] != nil
+        // 测量脚本用 WESTIE_CONFIG_HOME 给每次运行单独的配置目录；没另指时绝不落到（并清空）真实的 ~/.config/westie。
+        let file = environment["WESTIE_CONFIG_HOME"] != nil
             ? ConfigHome.url.appending(path: "settings.json")
             : KernelConfiguration.repoRoot.appending(path: "temp/automation/settings.json")
         if environment["WESTIE_LAYOUT_KEEP"] == nil { try? FileManager.default.removeItem(at: file) }
