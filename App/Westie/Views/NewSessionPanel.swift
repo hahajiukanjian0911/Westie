@@ -110,6 +110,7 @@ struct NewSessionPanel: View {
                 }
             }
             .scrollIndicators(.never)
+            .scrollEdgeFade(16)
             .frame(maxHeight: 420)
             .fixedSize(horizontal: false, vertical: true)
         }

@@ -100,9 +100,7 @@ struct SidebarView: View {
             }
         }
         .scrollIndicators(.never)
-        .mask {
-            LinearGradient(stops: [.init(color: .black, location: 0.94), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
-        }
+        .scrollEdgeFade()
         .frame(maxHeight: .infinity)
     }
 
@@ -198,6 +196,7 @@ struct SidebarView: View {
                     .padding(.bottom, 8)
                 }
                 .scrollIndicators(.never)
+                .scrollEdgeFade()
                 .frame(maxHeight: .infinity)
                 .transition(.opacity)
             }
@@ -266,6 +265,7 @@ struct SidebarView: View {
             .padding(.bottom, 8)
         }
         .scrollIndicators(.never)
+        .scrollEdgeFade()
         .frame(maxHeight: .infinity)
     }
 

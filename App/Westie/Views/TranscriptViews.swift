@@ -87,10 +87,10 @@ struct ProcessView: View {
                     icon
                     label
                         .id(labelKey)
-                        // 整行翻过去：位移等于行高，加上外面的裁切，新旧两句任何一帧都不叠在同一处
+                        // 整行翻过去：位移等于行高，加上外面的裁切，新旧两句任何一帧都不叠在同一处；同时淡入淡出，边上不露半截字
                         .transition(.asymmetric(
-                            insertion: .offset(y: 24),
-                            removal: .offset(y: -24)
+                            insertion: .offset(y: 24).combined(with: .opacity),
+                            removal: .offset(y: -24).combined(with: .opacity)
                         ))
                         .lineLimit(1).truncationMode(.tail)
                     Image(systemName: "chevron.right")
@@ -345,6 +345,7 @@ private struct ProcessStepRow: View {
                 }
                 .frame(maxHeight: 160)
                 .fixedSize(horizontal: false, vertical: true)
+                .scrollEdgeFade(16)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(palette.code, in: .rect(cornerRadius: 8))
                 .padding(.leading, 22).padding(.top, 2).padding(.bottom, 6)

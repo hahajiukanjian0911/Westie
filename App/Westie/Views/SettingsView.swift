@@ -48,6 +48,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollIndicators(.never)
+            .scrollEdgeFade()
         }
         .overlay(alignment: .bottom) { errorLine }
     }

@@ -15,6 +15,7 @@ struct ConversationView: View {
     /// 原地等候（设计稿 2026-10-29-loading v1 方向 A）：200ms 还没到才出占位条；到了只淡入内容。
     @State private var placeholderShown = false
     @State private var revealed = false
+    @State private var edgeFade = EdgeFadeState()
 
     private var running: Bool {
         conversation.running || model.sessions[conversation.sessionId]?.running == true
@@ -72,8 +73,11 @@ struct ConversationView: View {
                     scroller.refreshMetrics()
                 }
             )
+            // 滚出视口的一侧渐隐，不把一行字横切；状态只给遮罩读，滚动时不重算对话
+            .mask { EdgeFadeMask(state: edgeFade) }
             .onAppear {
-                scroller.onMetrics = { metrics in
+                scroller.onMetrics = { [edgeFade] metrics in
+                    edgeFade.update(above: metrics.offset, below: metrics.distanceToEnd, fade: 24)
                     let shows = revealed && metrics.distanceToEnd > 40
                     if shows != showsBackToBottom { showsBackToBottom = shows }
                     loadEarlierIfNearTop(offset: metrics.offset)
