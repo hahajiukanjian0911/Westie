@@ -285,7 +285,7 @@ private struct WindowTile: View {
                 let width = layout.tileFrames[window.id]?.width ?? 0
                 let dx = abs(point.x - width / 2)
                 nearGrip = point.y < WindowGrip.reach.height && dx < WindowGrip.reach.width / 2
-                onGrip = point.y < 16 && dx < 36
+                onGrip = point.y < WindowGrip.hit.height && dx < WindowGrip.hit.width / 2
             case .ended:
                 hovering = false
                 nearGrip = false
@@ -385,10 +385,11 @@ private struct WindowTile: View {
         .padding(.leading, leading)
         .padding(.trailing, 8)
         .frame(height: onFrame ? 36 : 44)
-        .background { dragArea }
+        // 只有顶部正中的拖动条能拖窗口，标题栏其他空白处不拖；垫在标题栏底下，窄窗口里与按钮重叠时按钮优先
+        .background(alignment: .top) { dragArea.frame(width: WindowGrip.hit.width, height: WindowGrip.hit.height) }
     }
 
-    /// 标题栏空白处（拖动条就画在它上面）：拖着窗口换位置。
+    /// 顶部拖动条：拖着窗口换位置。
     private var dragArea: WindowDragArea {
         WindowDragArea {
             layout.focus(window.id)
@@ -489,11 +490,13 @@ private struct WindowTile: View {
 private struct WindowGrip: View {
     /// 指针进入窗口顶部正中这块范围内就浮出。
     static let reach = CGSize(width: 180, height: 28)
+    /// 能按住拖动的范围，比画出来的横条宽一圈，好按。
+    static let hit = CGSize(width: 72, height: 16)
     let shown: Bool
     let highlighted: Bool
     @Environment(\.palette) private var palette
 
-    /// 只画出来，不接事件：拖动由标题栏底下的拖动区域接，窄窗口里与按钮重叠时按钮优先。
+    /// 只画出来，不接事件：拖动由标题栏底下同位置的拖动区域接，窄窗口里与按钮重叠时按钮优先。
     var body: some View {
         Capsule()
             .fill(highlighted ? palette.ink3 : palette.ink4)
@@ -537,7 +540,7 @@ struct AppMoveArea: NSViewRepresentable {
     }
 }
 
-/// 拖动窗口的区域：标题栏空白处和顶部拖动条。用 AppKit 视图自己接按下和拖动，坐标换成 Workbench 坐标（与窗口内容左上角对齐）。
+/// 拖动窗口的区域：只有顶部拖动条。用 AppKit 视图自己接按下和拖动，坐标换成 Workbench 坐标（与窗口内容左上角对齐）。
 struct WindowDragArea: NSViewRepresentable {
     let onPress: () -> Void
     let onDrag: (CGPoint, CGPoint) -> Void

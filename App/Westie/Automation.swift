@@ -14,7 +14,7 @@ import WestieKit
 ///      `toggle:<面板>` `hide`（收起聚焦窗口） `appearance:dark|light`（只改 App 外观） `layout`（记录各面板的窗口）
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
-///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图）
+///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图） `hittest`（各窗口顶部正中、标题栏、正文的命中视图）
 ///      会话列表：`archive[:<序号>]` `unarchive`（恢复最近一个归档） `newpanel[:off]`（⌘N 面板）
 ///      设置：`settings[:<分页>]`（打开设置卡片并记录读到的值） `theme:<序号>`（换主题） `set:<键>=<值>`（写内核设置后重读）
 ///      `font:<项>=<值>`（改字体、字号、行高等，`preset=<序号>` 换搭配，`expand=true` 展开逐项自定义；项见下方 font 分支）
@@ -286,6 +286,20 @@ enum Automation {
                     note("search \(argument): \(hits.count) " + hits.prefix(3).map { "\(model.sessions[$0.sessionId]?.displayTitle ?? $0.sessionId)「\($0.snippet.prefix(40))」" }.joined(separator: " | "))
                 } catch {
                     note("FAIL search \(argument) \(error)")
+                }
+            case "hittest":
+                // 每个窗口取几个点做命中测试，核对只有顶部拖动条能拖窗口
+                guard let content = NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) && $0.frame.width > 400 })?.contentView else { note("FAIL hittest"); break }
+                for (id, frame) in layout.tileFrames {
+                    let points = [("grip", frame.midX, frame.minY + 6), ("title-left", frame.minX + frame.width * 0.3, frame.minY + 20),
+                                  ("title-right", frame.minX + frame.width * 0.7, frame.minY + 20), ("body", frame.midX, frame.midY)]
+                    let hits = points.map { name, x, y in
+                        // hitTest 要的是父视图坐标
+                        let point = content.convert(NSPoint(x: x, y: content.isFlipped ? y : content.bounds.height - y), to: content.superview)
+                        let hit = content.hitTest(point)
+                        return "\(name)=\(hit is WindowDragArea.AreaView ? "drag" : hit.map { String(reflecting: type(of: $0)).split(separator: ".").suffix(2).joined(separator: ".").prefix(28) } ?? "nil")"
+                    }
+                    note("hittest \(PanelID.allCases.lazy.compactMap { layout.state($0).window(id) }.first?.content.title(model: model) ?? "?") \(hits.joined(separator: " "))")
                 }
             case "newpanel":
                 // 打开或收起 ⌘N 面板（截图用）
