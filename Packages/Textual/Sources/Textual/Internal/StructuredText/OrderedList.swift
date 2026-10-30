@@ -35,6 +35,9 @@ extension StructuredText {
           )
         }
       }
+      .backgroundPreferenceValue(MarkerWidthKey.self) { value in
+        Color.clear.preference(key: TextualLayoutReadyKey.self, value: markerWidth == value)
+      }
       .onPreferenceChange(MarkerWidthKey.self) { @MainActor in
         markerWidth = $0
       }

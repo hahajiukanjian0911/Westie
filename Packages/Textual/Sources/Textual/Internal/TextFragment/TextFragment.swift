@@ -28,6 +28,7 @@ import SwiftUI
 struct TextFragment<Content: AttributedStringProtocol>: View {
   @Environment(\.textEnvironment) private var textEnvironment
   @State private var textBuilder: TextBuilder?
+  @State private var builtContent: Content?
 
   private let content: Content
 
@@ -44,6 +45,10 @@ struct TextFragment<Content: AttributedStringProtocol>: View {
       }
       .onChange(of: content, initial: true) { _, newValue in
         self.textBuilder = TextBuilder(newValue, environment: textEnvironment)
+        self.builtContent = newValue
+      }
+      .transformPreference(TextualLayoutReadyKey.self) { value in
+        value = value && builtContent == content
       }
       .modifier(TextSelectionBackground())
       .modifier(AttachmentOverlay(attachments: content.attachments()))

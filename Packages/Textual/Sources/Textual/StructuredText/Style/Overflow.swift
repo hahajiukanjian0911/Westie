@@ -66,6 +66,12 @@ public struct Overflow<Content: View>: View {
           Color.clear
             .frame(minHeight: contentHeight)
           content(.scroll(containerWidth: containerWidth))
+            .background {
+              GeometryReader { geometry in
+                Color.clear.preference(key: TextualLayoutReadyKey.self,
+                  value: containerWidth != nil && abs(geometry.size.height - (contentHeight ?? -1)) < 0.01)
+              }
+            }
             .onGeometryChange(for: CGFloat.self, of: \.size.height) {
               contentHeight = $0
             }
@@ -76,8 +82,10 @@ public struct Overflow<Content: View>: View {
             }
         }
       }
-      .onScrollGeometryChange(for: CGFloat.self, of: \.containerSize.width) {
-        containerWidth = $1
+      // Westie: the local viewport exists for offscreen hosted turns too.
+      // Scroll-visibility callbacks can otherwise leave their initial width unresolved.
+      .onGeometryChange(for: CGFloat.self, of: \.size.width) {
+        containerWidth = $0
       }
       // Propagate gesture exclusion area
       .background(

@@ -20,6 +20,9 @@ struct WithInlineStyle<Content: View>: View {
   @Environment(\.textEnvironment) private var environment
 
   @State private var output: AttributedString?
+  @State private var resolvedInput: AttributedString?
+  @State private var resolvedStyle: InlineStyle?
+  @State private var resolvedEnvironment: TextEnvironmentValues?
 
   private let input: AttributedString
   private let content: (AttributedString) -> Content
@@ -34,6 +37,9 @@ struct WithInlineStyle<Content: View>: View {
 
   var body: some View {
     content(output ?? AttributedString())
+      .transformPreference(TextualLayoutReadyKey.self) { value in
+        value = value && resolvedInput == input && resolvedStyle == style && resolvedEnvironment == environment
+      }
       .onChange(of: Tuple(input, style, environment), initial: true) { _, newValue in
         resolve(
           attributedString: newValue.values.0,
@@ -79,5 +85,8 @@ struct WithInlineStyle<Content: View>: View {
     }
 
     self.output = output
+    self.resolvedInput = attributedString
+    self.resolvedStyle = style
+    self.resolvedEnvironment = environment
   }
 }

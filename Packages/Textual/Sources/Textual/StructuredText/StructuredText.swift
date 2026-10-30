@@ -103,6 +103,7 @@ import SwiftUI
 /// ``MarkupParser`` implementation.
 public struct StructuredText: View {
   @State private var attributedString = AttributedString()
+  @State private var parsedMarkup: String?
 
   private let markup: String
   private let parser: any MarkupParser
@@ -122,6 +123,9 @@ public struct StructuredText: View {
         .modifier(TextSelectionCoordination())
     }
     .coordinateSpace(.textContainer)
+    .transformPreference(TextualLayoutReadyKey.self) { value in
+      value = value && parsedMarkup == markup
+    }
     .onChange(of: markup, initial: true) {
       markupDidChange(markup)
     }
@@ -131,6 +135,7 @@ public struct StructuredText: View {
 
   private func markupDidChange(_ markup: String) {
     self.attributedString = (try? parser.attributedString(for: markup)) ?? .init()
+    self.parsedMarkup = markup
   }
 }
 

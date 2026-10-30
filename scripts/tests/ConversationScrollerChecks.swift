@@ -26,7 +26,8 @@ import SwiftUI
         func offset() -> CGFloat { view.contentView.bounds.minY }
         layout(1000)
         expect(scroller.hasMeasuredHistory, "快照已布局才允许按顶部位置翻页")
-        expect(offset() == 1024 - viewport, "首次打开贴底")
+        scroller.presentInitialLayout()
+        expect(offset() == 100 - 16, "首次打开实际末轮用户行贴顶16pt")
         scroller.userScroll(to: 150)
         layout(1300, 50, ["older": 8, "user": 300]) // 前面+200，尾部+100
         expect(offset() == 350, "分页同时尾部增高，仅补偿锚点200pt")
@@ -109,8 +110,81 @@ import SwiftUI
         weak let released = ephemeral
         ephemeral = nil
         expect(released == nil && orphanTimer?.isValid == false, "析构失效RunLoop持有的Timer")
+        chunkChecks()
         print("\(checks) checks passed")
     }
+    @MainActor @Observable final class ChunkState {
+        let id: String
+        var height: CGFloat
+        var ready = true
+        init(_ id: String, _ height: CGFloat) { self.id = id; self.height = height }
+    }
+    struct ChunkContent: View, Equatable {
+        let state: ChunkState
+        nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.state === rhs.state }
+        var body: some View {
+            Color.clear.frame(height: state.height)
+                .anchorPreference(key: ConversationChunkRows.self, value: .bounds) { [state.id: $0] }
+                .preference(key: ConversationChunkReady.self, value: state.ready)
+        }
+    }
+    static func chunkChecks() {
+        let scroll = ConversationScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
+        scroll.hasVerticalScroller = false
+        let document = ConversationChunkDocument<ChunkContent>()
+        scroll.documentView = document
+        let scroller = ConversationScroller()
+        document.scroller = scroller
+        scroller.attach(scrollView: scroll, document: document)
+        let a = ChunkState("a", 600), b = ChunkState("b", 300), old = ChunkState("old", 400)
+        b.ready = false
+        var readyCount = 0
+        func update(_ values: [ChunkState], seq: Int) {
+            document.update(values.map { .init(id: $0.id, content: ChunkContent(state: $0)) },
+                            firstSeq: seq, lastUserId: "b", columnWidth: nil,
+                            onReady: { readyCount += 1 })
+            settle()
+        }
+        func settle() {
+            for _ in 0..<5 {
+                document.layoutSubtreeIfNeeded()
+                runLoop(for: 0.03)
+            }
+        }
+        update([a, b], seq: 100)
+        expect(readyCount == 0 && !scroller.hasMeasuredHistory && scroll.contentView.bounds.minY == 0,
+               "首开未完成的块不发布历史、不滚动、不开放显示")
+        a.height = 700
+        b.ready = true
+        settle()
+        expect(readyCount == 1 && abs(scroll.contentView.bounds.minY - 708) < 0.01,
+               "全部块就绪后按完整高度一次提交首开锚点")
+        a.height = 600
+        scroller.hold()
+        settle()
+        scroller.userScroll(to: 608)
+        expect(document.subviews.count == 2, "切块一次创建全部宿主")
+        expect(abs(document.subviews[1].frame.minY - 624) < 0.01, "切块初次测量后紧接上轮与16pt间距")
+        expect(abs(scroll.contentView.bounds.minY - 608) < 0.01, "切块初始用户锚点贴顶16pt")
+        let aView = document.subviews[0], bView = document.subviews[1]
+        scroller.hold()
+        let held = scroll.contentView.bounds.minY
+        b.height = 700
+        settle()
+        expect(abs(bView.frame.height - 700) < 0.01, "块内观察变化同步宿主高度")
+        expect(scroll.contentView.bounds.minY == held && aView.frame.height == 600, "展开尾块保持点击行与上方缓存高度")
+        b.height = 100
+        settle()
+        expect(bView.frame.height == 100 && scroll.contentView.bounds.minY == held, "收起尾块保持位置及合法留白")
+        scroller.userScroll(to: 500)
+        let before = scroll.contentView.bounds.minY
+        update([old, a, b], seq: 50)
+        expect(document.subviews.contains { $0 === aView } && document.subviews.contains { $0 === bView }, "顶部插入复用已有宿主")
+        expect(abs(scroll.contentView.bounds.minY - before - 416) < 0.01, "切块分页只补偿新块高度及间距")
+        expect(abs(bView.frame.minY - 1040) < 0.01, "分页下方块仅平移不重复测量")
+        scroller.detach()
+    }
+
     static func runLoop(for duration: TimeInterval) {
         RunLoop.main.run(until: Date().addingTimeInterval(duration))
     }

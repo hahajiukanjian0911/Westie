@@ -51,6 +51,10 @@ extension StructuredText {
     var body: some View {
       // Read the block spacing preference and apply it as a layout value
       content
+        .backgroundPreferenceValue(BlockSpacingKey.self) { value in
+          Color.clear.preference(key: TextualLayoutReadyKey.self,
+            value: blockSpacing == (listItemSpacingEnabled ? resolvedListItemSpacing : value))
+        }
         .onPreferenceChange(BlockSpacingKey.self) { @MainActor value in
           // Override with the resolved list item spacing if enabled
           blockSpacing = listItemSpacingEnabled ? resolvedListItemSpacing : value

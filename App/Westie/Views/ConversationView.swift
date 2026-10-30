@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 import WestieKit
 
 struct ConversationView: View {
@@ -31,13 +32,45 @@ struct ConversationView: View {
         loadEarlier()
     }
 
+    private var hostedChunks: [ConversationChunk<ConversationHostedContent>] {
+        var groups: [(String, [ConversationRow])] = []
+        for row in conversation.rows {
+            if case .item(.user) = row.content.block {
+                groups.append((row.id, [row]))
+            } else if groups.isEmpty {
+                groups.append(("prefix", [row]))
+            } else {
+                groups[groups.count - 1].1.append(row)
+            }
+        }
+        if groups.isEmpty { groups.append(("prefix", [])) }
+        func content(_ rows: [ConversationRow], tail: Bool, earlier: Bool = false) -> ConversationHostedContent {
+            .init(model: model, conversation: conversation, scroller: scroller, rows: rows, tail: tail, earlier: earlier,
+                palette: palette, typography: typography, themeIndex: model.appearance.themeIndex)
+        }
+        var chunks = groups.enumerated().map { index, group in
+            ConversationChunk(id: group.0, content: content(group.1, tail: index == groups.count - 1))
+        }
+        if conversation.hasEarlierHistory {
+            chunks.insert(.init(id: "earlier", content: content([], tail: false, earlier: true)), at: 0)
+        }
+        return chunks
+    }
+
     var body: some View {
         let _ = PerfTrace.count("conversation_body")
         VStack(spacing: 0) {
             ConversationScroll(
                 scroller: scroller,
-                content: ConversationHostedContent(model: model, conversation: conversation, scroller: scroller,
-                    revealed: revealed, palette: palette, typography: typography, themeIndex: model.appearance.themeIndex)
+                chunks: hostedChunks,
+                firstSeq: conversation.firstSeq, lastUserId: conversation.lastUserId,
+                columnWidth: typography.chatColumnWidth,
+                loaded: !conversation.isLoading,
+                onReady: {
+                    placeholderShown = false
+                    withAnimation(.easeOut(duration: 0.18)) { revealed = true }
+                    scroller.refreshMetrics()
+                }
             )
             .onAppear {
                 scroller.onMetrics = { metrics in
@@ -58,6 +91,8 @@ struct ConversationView: View {
                     scroller.sent(id)
                 }
             }
+            // 保持宿主正常排版与绘制；由独立遮盖挡住尚未提交的首开布局。
+            .overlay { if !revealed { palette.card.accessibilityHidden(true).transition(.opacity) } }
             .overlay(alignment: .bottom) {
                 if showsBackToBottom {
                     Button {
@@ -78,7 +113,7 @@ struct ConversationView: View {
                 }
             }
             .overlay(alignment: .top) {
-                if conversation.isLoading, placeholderShown {
+                if !revealed, placeholderShown {
                     // 内容从上往下排，占位条也从上方开始，到了直接换成内容
                     LoadingPlaceholder()
                         .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
@@ -98,14 +133,10 @@ struct ConversationView: View {
             }
             .task {
                 try? await Task.sleep(for: .milliseconds(200))
-                if conversation.isLoading { placeholderShown = true }
+                if !revealed { placeholderShown = true }
             }
             .onChange(of: conversation.isLoading, initial: true) { _, loading in
-                guard !loading, !revealed else { return }
-                // 占位条与内容同一帧换掉，不做两层交叉淡变；只给内容一个淡入
-                placeholderShown = false
-                withAnimation(.easeOut(duration: 0.18)) { revealed = true }
-                scroller.refreshMetrics()
+                if !loading { scroller.refreshMetrics() }
             }
 
             Group {
@@ -150,95 +181,42 @@ private struct ConversationHostedContent: View, Equatable {
     let model: AppModel
     let conversation: ConversationModel
     let scroller: ConversationScroller
-    let revealed: Bool
+    let rows: [ConversationRow]
+    let tail: Bool
+    let earlier: Bool
     let palette: Palette
     let typography: Typography
     let themeIndex: Int
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.model === rhs.model && lhs.conversation === rhs.conversation && lhs.scroller === rhs.scroller
-            && lhs.revealed == rhs.revealed && lhs.palette.dark == rhs.palette.dark
+            && lhs.rows.map(ObjectIdentifier.init) == rhs.rows.map(ObjectIdentifier.init)
+            && lhs.tail == rhs.tail && lhs.earlier == rhs.earlier
+            && lhs.palette.dark == rhs.palette.dark
             && lhs.typography == rhs.typography && lhs.themeIndex == rhs.themeIndex
     }
 
     var body: some View {
-        ConversationContent(model: model, conversation: conversation, scroller: scroller)
-            .opacity(revealed ? 1 : 0)
+        VStack(alignment: .leading, spacing: 16) {
+            if earlier {
+                EarlierHistoryRow(conversation: conversation) { Task { await conversation.loadEarlier() } }
+            } else {
+                ForEach(rows) { row in
+                    ConversationBlockView(row: row, model: model, conversation: conversation)
+                        .anchorPreference(key: ConversationChunkRows.self, value: .bounds) { [row.id: $0] }
+                }
+                if tail { ConversationTail(model: model, conversation: conversation) }
+            }
+        }
+            .backgroundPreferenceValue(TextualLayoutReadyKey.self) { ready in
+                Color.clear.preference(key: ConversationChunkReady.self, value: ready)
+            }
             .environment(\.palette, palette)
             .environment(\.typography, typography)
             .environment(\.pauseFollowing) { [scroller] _ in scroller.hold() }
             .font(typography.ui(13))
             .foregroundStyle(palette.ink)
             .tint(palette.accent)
-    }
-}
-
-private enum ConversationSpace {
-    static let name = "conversation"
-}
-
-/// 历史与 live 尾部各自观察；保留一次排完的非懒 VStack。
-private struct ConversationContent: View {
-    @Environment(\.typography) private var typography
-    let model: AppModel
-    let conversation: ConversationModel
-    let scroller: ConversationScroller
-
-    var body: some View {
-        let _ = PerfTrace.count("conversation_content_body")
-        TopAligned {
-            VStack(alignment: .leading, spacing: 16) {
-                if conversation.hasEarlierHistory {
-                    EarlierHistoryRow(conversation: conversation) { Task { await conversation.loadEarlier() } }
-                }
-                if !conversation.rows.isEmpty {
-                    ConversationHistory(model: model, conversation: conversation)
-                }
-                ConversationTail(model: model, conversation: conversation)
-            }
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(key: ConversationMeasurements.self, value: ConversationGeometry(
-                        end: proxy.frame(in: .named(ConversationSpace.name)).minY + proxy.size.height,
-                        firstSeq: nil, lastUserId: nil, rows: [:]))
-                }
-            }
-            .onPreferenceChange(ConversationMeasurements.self) { value in
-                scroller.layoutChanged(value)
-            }
-            .frame(maxWidth: typography.chatColumnWidth, alignment: .leading)
-            .padding(.horizontal, 24)
-            .padding(.top, 8)
-            .frame(maxWidth: .infinity)
-        }
-        .coordinateSpace(.named(ConversationSpace.name))
-    }
-}
-
-/// live 文本变高时，这个区域的尺寸和历史锚点不变，无须重新解析整树坐标。
-private struct ConversationHistory: View {
-    let model: AppModel
-    let conversation: ConversationModel
-
-    var body: some View {
-        let _ = PerfTrace.count("conversation_history_body")
-        let firstSeq = conversation.firstSeq
-        let lastUserId = conversation.lastUserId
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(conversation.rows) { row in
-                ConversationBlockView(row: row, model: model, conversation: conversation)
-                    .anchorPreference(key: ConversationRowAnchors.self, value: .bounds) { [row.id: $0] }
-            }
-        }
-        .backgroundPreferenceValue(ConversationRowAnchors.self) { anchors in
-            GeometryReader { proxy in
-                let origin = proxy.frame(in: .named(ConversationSpace.name)).minY
-                let _ = PerfTrace.count("history_anchor_resolve")
-                Color.clear.preference(key: ConversationMeasurements.self, value: ConversationGeometry(
-                    end: 0, firstSeq: firstSeq, lastUserId: lastUserId,
-                    rows: anchors.mapValues { origin + proxy[$0].minY }))
-            }
-        }
     }
 }
 
@@ -296,41 +274,6 @@ private struct ConversationTail: View {
             QuestionCard(question: question) { selections, custom in
                 Task { await model.answer(question, selections: selections, custom: custom) }
             }
-        }
-    }
-}
-
-/// 同一轮 preference 里提交历史坐标和尾部底边，分页补偿不混入尾部增长。
-private struct ConversationMeasurements: PreferenceKey {
-    static var defaultValue: ConversationGeometry { ConversationGeometry(end: 0, firstSeq: nil, lastUserId: nil, rows: [:]) }
-
-    static func reduce(value: inout ConversationGeometry, nextValue: () -> ConversationGeometry) {
-        let next = nextValue()
-        value.end = max(value.end, next.end)
-        if let firstSeq = next.firstSeq { value.firstSeq = firstSeq }
-        if let lastUserId = next.lastUserId { value.lastUserId = lastUserId }
-        value.rows.merge(next.rows, uniquingKeysWith: { _, latest in latest })
-    }
-}
-
-private struct ConversationRowAnchors: PreferenceKey {
-    static var defaultValue: [String: Anchor<CGRect>] { [:] }
-
-    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
-    }
-}
-
-/// 子视图按自身理想高度排、贴顶摆放。文档高度比内容晚一拍跟上时，多出来的部分往下伸，
-/// 不像 fixedSize 那样把超出的内容居中（那会让整页先往上偏半截再回来）。
-private struct TopAligned: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        proposal.replacingUnspecifiedDimensions()
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        for subview in subviews {
-            subview.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: nil))
         }
     }
 }

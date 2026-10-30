@@ -11,3 +11,4 @@
    - 内容变化后过期的分词结果直接丢弃；
    - 高亮重建字符串后，把原文上的 `streamBirth` 按字符位置搬过去。
 4. `Internal/Helpers/VerticalAlignment+FirstTextCenter.swift`：`firstTextCenter` 改为 public，App 的列表样式用它让标记对齐首行中线。
+5. `StructuredText/LayoutReadyKey.swift`：汇总初次解析、行内样式、文本构建、块间距、列表标记和表格/溢出尺寸的就绪状态，供按轮宿主完整布局后再显示；不等待异步附件下载。相关节点只报告状态，不改变已有排版与选择范围。`Overflow.swift` 改从自身几何取容器宽度，避免离屏内容依赖滚动可见性回调而停在中间尺寸。

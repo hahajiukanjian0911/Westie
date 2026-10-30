@@ -33,6 +33,9 @@ extension StructuredText {
         indentationLevel: indentationLevel
       )
       let resolvedStyle = tableStyle.resolve(configuration: configuration)
+        .backgroundPreferenceValue(TableCell.SpacingKey.self) { value in
+          Color.clear.preference(key: TextualLayoutReadyKey.self, value: spacing == value)
+        }
         .onPreferenceChange(TableCell.SpacingKey.self) { @MainActor in
           spacing = $0
         }

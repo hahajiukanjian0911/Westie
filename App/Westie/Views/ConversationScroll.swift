@@ -8,9 +8,111 @@ import WestieKit
 /// （见 shared/skills/motion-pitfalls/patterns/scroll-anchor-loss.md）。这里偏移只在三种情况下变：
 /// 用户自己滚、跟随底部、加载更早历史时补偿新插入的高度。其余任何高度变化都不动偏移；
 /// 内容变短时文档高度至少留到“当前偏移 + 视口”，偏移不会被夹回，看着的东西就不会跳。
+/// 每块拥有自己的 SwiftUI 布局图；高度/局部行坐标留在 AppKit，后续可用等高占位替换视图。
+struct ConversationChunk<Content: View & Equatable>: Identifiable {
+    let id: String
+    let content: Content
+}
+
+struct ConversationChunkGeometry: Equatable {
+    var height: CGFloat = 0
+    var targetHeight: CGFloat = 0
+    var width: CGFloat = 0
+    var rows: [String: CGFloat] = [:]
+    var ready = true
+
+    func matches(_ other: Self) -> Bool {
+        // 移动宿主后锚点换算可能留下浮点舍入尾数，不能把它反馈成新一轮布局。
+        abs(height - other.height) < 0.000_001 && abs(targetHeight - other.targetHeight) < 0.000_001
+            && abs(width - other.width) < 0.000_001 && ready == other.ready
+            && rows.count == other.rows.count
+            && rows.allSatisfy { id, y in other.rows[id].map { abs($0 - y) < 0.000_001 } == true }
+    }
+}
+
+struct ConversationChunkReady: PreferenceKey {
+    static var defaultValue: Bool { true }
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = nextValue() && value }
+}
+
+struct ConversationChunkRows: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] { [:] }
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+private struct ChunkGeometryKey: PreferenceKey {
+    static var defaultValue: ConversationChunkGeometry { .init() }
+    static func reduce(value: inout ConversationChunkGeometry, nextValue: () -> ConversationChunkGeometry) {
+        let next = nextValue()
+        value.height = max(value.height, next.height)
+        value.targetHeight = max(value.targetHeight, next.targetHeight)
+        value.width = max(value.width, next.width)
+        value.rows.merge(next.rows, uniquingKeysWith: { _, next in next })
+        value.ready = value.ready && next.ready
+    }
+}
+
+private struct ChunkBottomKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+private struct MeasuredChunk<Content: View>: View {
+    let content: Content
+    let measured: (ConversationChunkGeometry) -> Void
+
+    var body: some View {
+        ChunkTopAligned {
+            VStack(spacing: 0) {
+                content
+                Color.clear.frame(height: 0)
+                    .anchorPreference(key: ChunkBottomKey.self, value: .bounds) { $0 }
+            }
+                .backgroundPreferenceValue(ChunkBottomKey.self) { bottom in
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: ChunkGeometryKey.self, value: .init(
+                            height: bottom.map { proxy[$0].minY } ?? 0))
+                    }
+                }
+                .backgroundPreferenceValue(ConversationChunkRows.self) { anchors in
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: ChunkGeometryKey.self, value: .init(
+                            targetHeight: proxy.size.height, width: proxy.size.width,
+                            rows: anchors.mapValues { proxy[$0].minY }))
+                    }
+                }
+                .backgroundPreferenceValue(ConversationChunkReady.self) { ready in
+                    Color.clear.preference(key: ChunkGeometryKey.self, value: .init(ready: ready))
+                }
+                .onPreferenceChange(ChunkGeometryKey.self, perform: measured)
+        }
+    }
+}
+
+/// 宿主给定缓存高度，内部始终用理想高度贴顶排；新高度在同一次 AppKit 布局里提交。
+private struct ChunkTopAligned: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(at: bounds.origin, anchor: .topLeading, proposal: .init(width: bounds.width, height: nil))
+        }
+    }
+}
+
 struct ConversationScroll<Content: View & Equatable>: NSViewRepresentable {
     let scroller: ConversationScroller
-    let content: Content
+    let chunks: [ConversationChunk<Content>]
+    let firstSeq: Int?
+    let lastUserId: String?
+    let columnWidth: CGFloat?
+    let loaded: Bool
+    var onReady: () -> Void
 
     func makeNSView(context: Context) -> ConversationScrollView {
         let scrollView = ConversationScrollView()
@@ -23,43 +125,171 @@ struct ConversationScroll<Content: View & Equatable>: NSViewRepresentable {
         scrollView.contentInsets = NSEdgeInsetsZero
         scrollView.verticalScrollElasticity = .allowed
         scrollView.horizontalScrollElasticity = .none
-
-        let document = FlippedView()
-        let hosting = NSHostingView(rootView: content)
-        // 尺寸完全由文档视图给定：不让 SwiftUI 按内容改自身大小，也不按窗口标题栏加安全区（滚动时安全区会变，内容会跟着挪）
-        hosting.sizingOptions = []
-        hosting.safeAreaRegions = []
-        hosting.autoresizingMask = [.width, .height]
-        hosting.frame = document.bounds
-        document.addSubview(hosting)
+        let document = ConversationChunkDocument<Content>()
+        document.scroller = scroller
         scrollView.documentView = document
-
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.contentView.postsFrameChangedNotifications = true
         scroller.attach(scrollView: scrollView, document: document)
-        context.coordinator.hosting = hosting
-        context.coordinator.content = content
         return scrollView
     }
 
     func updateNSView(_ scrollView: ConversationScrollView, context: Context) {
         PerfTrace.count("hosting_update")
-        guard context.coordinator.content != content else { return }
-        context.coordinator.content = content
-        PerfTrace.count("hosting_root_replace")
-        context.coordinator.hosting?.rootView = content
+        (scrollView.documentView as? ConversationChunkDocument<Content>)?.update(
+            chunks, firstSeq: firstSeq, lastUserId: lastUserId, columnWidth: columnWidth,
+            loaded: loaded, onReady: onReady)
     }
 
-    static func dismantleNSView(_ scrollView: ConversationScrollView, coordinator: Coordinator) {
+    static func dismantleNSView(_ scrollView: ConversationScrollView, coordinator: ()) {
         scrollView.scroller?.detach()
-        coordinator.hosting = nil
+        scrollView.documentView = nil
+    }
+}
+
+/// 一次创建全部轮。只测新增块/宽度改变的块；内部流式或展开直接报告本块高度，不重测历史。
+final class ConversationChunkDocument<Content: View & Equatable>: NSView {
+    override var isFlipped: Bool { true }
+    weak var scroller: ConversationScroller?
+
+    @MainActor private final class Entry {
+        let id: String
+        var content: Content
+        let hosting: NSHostingView<MeasuredChunk<Content>>
+        var geometry = ConversationChunkGeometry()
+        var hasMeasurement = false
+        init(id: String, content: Content, measured: @escaping (ConversationChunkGeometry) -> Void) {
+            self.id = id
+            self.content = content
+            hosting = NSHostingView(rootView: MeasuredChunk(content: content, measured: measured))
+            hosting.sizingOptions = []
+            hosting.safeAreaRegions = []
+        }
+    }
+    private var entries: [Entry] = []
+    private var byId: [String: Entry] = [:]
+    private var firstSeq: Int?
+    private var lastUserId: String?
+    private var columnWidth: CGFloat?
+    private var measuredWidth: CGFloat = -1
+    private var updating = false
+    private var dirty = false
+    private var revision = 0
+    private var loaded = false
+    private var presented = false
+    private var onReady: (() -> Void)?
+
+    func update(_ chunks: [ConversationChunk<Content>], firstSeq: Int?, lastUserId: String?, columnWidth: CGFloat?,
+                loaded: Bool = true, onReady: (() -> Void)? = nil) {
+        updating = true
+        self.loaded = loaded
+        self.onReady = onReady
+        self.firstSeq = firstSeq
+        self.lastUserId = lastUserId
+        self.columnWidth = columnWidth
+        let ids = Set(chunks.map(\.id))
+        for entry in entries where !ids.contains(entry.id) {
+            entry.hosting.removeFromSuperview()
+            byId[entry.id] = nil
+        }
+        entries = chunks.map { chunk in
+            if let entry = byId[chunk.id] {
+                if entry.content != chunk.content {
+                    entry.content = chunk.content
+                    entry.hosting.rootView = root(for: chunk)
+                    PerfTrace.count("hosting_root_replace")
+                }
+                return entry
+            }
+            let entry = Entry(id: chunk.id, content: chunk.content) { [weak self] value in self?.measured(chunk.id, value) }
+            byId[chunk.id] = entry
+            addSubview(entry.hosting)
+            return entry
+        }
+        measureNewOrResized()
+        updating = false
+        dirty = true
+        needsLayout = true
+        layoutSubtreeIfNeeded()
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    private func root(for chunk: ConversationChunk<Content>) -> MeasuredChunk<Content> {
+        MeasuredChunk(content: chunk.content) { [weak self] value in self?.measured(chunk.id, value) }
+    }
 
-    @MainActor final class Coordinator {
-        var hosting: NSHostingView<Content>?
-        var content: Content?
+    private func measured(_ id: String, _ value: ConversationChunkGeometry) {
+        guard let entry = byId[id], value.height.isFinite, value.height >= 0,
+              abs(entry.hosting.frame.width - value.width) < 0.01, value.width > 0,
+              (!entry.hasMeasurement || !entry.geometry.matches(value)) else { return }
+        #if DEBUG
+        trace("chunk \(id) width \(entry.hosting.frame.width) height \(value.height) target \(value.targetHeight) ready \(value.ready) rows \(value.rows)")
+        #endif
+        entry.geometry = value
+        entry.hasMeasurement = true
+        revision += 1
+        PerfTrace.count("chunk_geometry")
+        dirty = true
+        needsLayout = true
+    }
+
+    private func measureNewOrResized() {
+        let available = max(0, bounds.width - 48)
+        let width = min(available, columnWidth ?? available)
+        guard width > 0 else { return }
+        for entry in entries where measuredWidth != width || entry.hosting.frame.width == 0 {
+            PerfTrace.count("chunk_measure")
+            entry.hasMeasurement = false
+            entry.hosting.setFrameSize(CGSize(width: width, height: entry.geometry.height))
+            entry.hosting.layoutSubtreeIfNeeded()
+        }
+        measuredWidth = width
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if changed { dirty = true; needsLayout = true }
+    }
+
+    override func layout() {
+        super.layout()
+        guard !updating else { return }
+        updating = true
+        measureNewOrResized()
+        // 初次快照必须完整测完才发布；局部高度0不能被当作“已到顶”自动翻页。
+        guard dirty, entries.allSatisfy(\.hasMeasurement) else { updating = false; return }
+        let latest = placeEntries()
+        dirty = false
+        updating = false
+        let complete = entries.allSatisfy({ $0.geometry.ready && abs($0.geometry.height - $0.geometry.targetHeight) < 1 })
+        // 就绪之前不滚离正在解析的内容；也不把空/中间快照当成真实历史发布。
+        guard presented || (loaded && complete) else { return }
+        scroller?.layoutChanged(latest)
+        if !presented {
+            presented = true
+            scroller?.presentInitialLayout()
+            PerfTrace.count("conversation_layout_presented")
+            #if DEBUG
+            trace("present revision \(revision) end \(latest.end)")
+            #endif
+            if let onReady { DispatchQueue.main.async { onReady() } }
+        }
+    }
+
+    private func placeEntries() -> ConversationGeometry {
+        var y: CGFloat = 8
+        var rows: [String: CGFloat] = [:]
+        for (index, entry) in entries.enumerated() {
+            let next = CGRect(x: (bounds.width - measuredWidth) / 2, y: y, width: max(0, measuredWidth), height: entry.geometry.height)
+            if entry.hosting.frame != next {
+                entry.hosting.frame = next
+                PerfTrace.count("chunk_place")
+            }
+            for (id, local) in entry.geometry.rows { rows[id] = y + local }
+            y += entry.geometry.height
+            if index < entries.count - 1 { y += 16 }
+        }
+        return .init(end: y, firstSeq: firstSeq, lastUserId: lastUserId, rows: rows)
     }
 }
 
@@ -136,6 +366,14 @@ struct ConversationGeometry: Equatable {
     private var userScrolling = false
     /// apply 进行中：改文档高度时 AppKit 会顺手调一下偏移并发通知，这些回声不再触发 apply。
     private var applying = false
+
+    func presentInitialLayout() {
+        guard let lastUserY, let scrollView else { return }
+        following = false
+        setOffset(max(0, lastUserY - Self.anchorMargin))
+        following = scrollView.contentView.bounds.maxY >= baseHeight(viewport: scrollView.contentView.bounds.height) - 2
+        apply()
+    }
 
     func attach(scrollView: ConversationScrollView, document: NSView) {
         detach()
