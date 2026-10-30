@@ -130,3 +130,64 @@ private func fixture(_ name: String) throws -> (follow: [JSONValue], workspace: 
     #expect(call("ask_user_question").stepText == "向你提问")
     #expect(call("read", .object(["file_path": .string("/Users/a/Development/README.md")])).stepText == "Development/README.md")
 }
+
+@Test func everyPaginationBoundaryMatchesReplay() throws {
+    let frames = try fixture("bash").follow
+    let events = frames.flatMap { frame -> [JSONValue] in
+        if frame["type"]?.stringValue == "snapshot" { return (frame["records"]?.arrayValue ?? []).compactMap { $0["event"] } }
+        return frame["type"]?.stringValue == "event" ? frame["event"].map { [$0] } ?? [] : []
+    }
+    var full = Transcript()
+    events.forEach { full.apply(event: $0) }
+    for split in events.indices {
+        var paged = Transcript()
+        events[split...].forEach { paged.apply(event: $0) }
+        let records = events[..<split].map { JSONValue.object(["type": "event", "event": $0]) }
+        paged.prepend(pageRecords: records)
+        #expect(paged.items == full.items, "split \(split)")
+        #expect(paged.times == full.times, "split \(split)")
+        #expect(paged.blocks == full.blocks, "split \(split)")
+        #expect(paged.firstSeq == full.firstSeq)
+        #expect(paged.lastSeq == full.lastSeq)
+        #expect(paged.running == full.running)
+        // 前插后新到的工具结果仍按平移后的索引更新；副本不受影响。
+        let copy = paged
+        let call: JSONValue = ["seq": .number(10000), "type": "assistant/message", "data": ["message": ["content": .array([["type": "tool-call", "id": "future", "name": "bash", "arguments": "{}"]])]]]
+        let result: JSONValue = ["seq": .number(10001), "time": .number(2000), "type": "tool/result", "data": ["message": ["toolCallId": "future", "content": "done", "isError": true]]]
+        paged.apply(event: call)
+        paged.apply(event: result)
+        #expect(copy.items == full.items)
+        guard case .tool(let tool) = paged.items.last else { Issue.record("工具索引丢失"); continue }
+        #expect(tool.result == "done" && tool.isError)
+        #expect(tool.finishedAt == Date(timeIntervalSince1970: 2))
+    }
+}
+
+@Test func incrementalPagesPreserveLiveAndTurnState() {
+    let start: JSONValue = ["seq": .number(1), "type": "turn/start"]
+    let call: JSONValue = ["seq": .number(2), "time": .number(1000), "type": "assistant/message", "data": ["message": ["content": .array([["type": "tool-call", "id": "cross-page", "name": "read", "arguments": "{}"]])]]]
+    let result: JSONValue = ["seq": .number(3), "time": .number(3000), "type": "tool/result", "data": ["message": ["toolCallId": "cross-page", "content": "result"]]]
+    let irrelevant: JSONValue = ["seq": .number(4), "type": "session/title"]
+    var paged = Transcript()
+    paged.apply(event: result)
+    paged.apply(event: irrelevant)
+    paged.apply(streamFrame: ["type": "start"])
+    paged.apply(streamFrame: ["type": "chunk", "chunk": ["type": "text-delta", "text": "live"]])
+    let live = paged.live
+    // 结果与调用分属不同页；再往前翻才拿到 turn/start。
+    paged.prepend(pageRecords: [["type": "event", "event": call]])
+    paged.prepend(pageRecords: [["type": "event", "event": start]])
+    #expect(paged.live == live)
+    #expect(paged.running)
+    guard case .tool(let tool) = paged.items.first else { Issue.record("跨页调用丢失"); return }
+    #expect(tool.result == "result")
+    #expect(tool.finishedAt == Date(timeIntervalSince1970: 3))
+    #expect(paged.times[tool.id] == Date(timeIntervalSince1970: 1))
+    // 较新 turn/end 优先于旧页里的 start，预备页重复提交不改变状态。
+    paged.apply(event: ["seq": .number(5), "type": "turn/end", "data": ["reason": ["kind": "cancelled"]]])
+    let copy = paged
+    let page = Transcript.prepareHistoryPage(records: [["type": "event", "event": start]], beforeSeq: 2)
+    paged.prepend(historyPage: page)
+    #expect(paged == copy)
+    #expect(!paged.running && paged.live == nil)
+}

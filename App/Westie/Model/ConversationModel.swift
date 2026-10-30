@@ -106,7 +106,14 @@ final class ConversationModel {
                 "maxMessages": .number(120),
                 "turnWindow": ["minMessages": .number(50), "minTurns": .number(2)],
             ]])
-            transcript.prepend(pageRecords: page["records"]?.arrayValue ?? [])
+            let records = page["records"]?.arrayValue ?? []
+            let prepared = await Task.detached(priority: .userInitiated) {
+                let start = PerfTrace.clock()
+                let prepared = Transcript.prepareHistoryPage(records: records, beforeSeq: beforeSeq)
+                if PerfTrace.enabled { PerfTrace.mark("earlier_fold", ["ms": (PerfTrace.clock() - start) * 1000, "records": Double(records.count)]) }
+                return prepared
+            }.value
+            transcript.prepend(historyPage: prepared)
             publishTranscript(historyChanged: true)
             let loaded = (transcript.firstSeq ?? beforeSeq) < beforeSeq
             // 没拿到更早的记录却仍说还有，也停下，免得反复空翻。

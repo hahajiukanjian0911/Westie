@@ -50,10 +50,21 @@ public struct Transcript: Sendable, Equatable {
     public private(set) var running = false
     public private(set) var lastSeq = -1
     /// 已加载的最早一条日志事件的 seq；往前翻页时作为 `session/page` 的 beforeSeq。
-    public var firstSeq: Int? { events.first.flatMap(Self.seq(of:)) }
+    public private(set) var firstSeq: Int?
     private var toolIndex: [String: Int] = [:]
-    /// 已应用的全部日志事件（按 seq 升序）；往前翻页时整体重放，让跨页的工具调用和结果能对上。
-    private var events: [JSONValue] = []
+    /// 较新页先到的结果：补上调用所在的旧页时，仅修补这些跨页配对。
+    private var unmatchedResults: [String: ToolResult] = [:]
+    private var hasRunState = false
+
+    private struct ToolResult: Sendable, Equatable {
+        var text: String
+        var isError: Bool
+        var time: Date?
+    }
+
+    public struct HistoryPage: Sendable {
+        fileprivate var prefix: Transcript
+    }
 
     public init() {}
 
@@ -75,31 +86,47 @@ public struct Transcript: Sendable, Equatable {
         }
     }
 
-    /// 把 `session/page` 返回的更早一页记录接到最前面。
-    public mutating func prepend(pageRecords records: [JSONValue]) {
-        let first = firstSeq ?? Int.max
-        let older = records.compactMap { record -> JSONValue? in
+    /// 只折叠新取得的旧页；可在主 actor 外准备，不重放已有历史。
+    public static func prepareHistoryPage(records: [JSONValue], beforeSeq: Int) -> HistoryPage {
+        var prefix = Transcript()
+        for record in records {
             guard record["type"]?.stringValue == "event", let event = record["event"],
-                  let seq = Self.seq(of: event), seq < first else { return nil }
-            return event
+                  let seq = Self.seq(of: event), seq < beforeSeq else { continue }
+            prefix.apply(event: event)
         }
-        guard !older.isEmpty else { return }
-        let all = older + events
-        let keptLive = live
-        items = []
-        times = [:]
-        toolIndex = [:]
-        events = []
-        lastSeq = -1
-        running = false
-        all.forEach { apply(event: $0) }
-        live = keptLive
+        return HistoryPage(prefix: prefix)
+    }
+
+    public mutating func prepend(pageRecords records: [JSONValue]) {
+        prepend(historyPage: Self.prepareHistoryPage(records: records, beforeSeq: firstSeq ?? Int.max))
+    }
+
+    /// 保留较新条目和 live，仅合并旧页，并修复跨页工具结果与回合状态。
+    public mutating func prepend(historyPage page: HistoryPage) {
+        var prefix = page.prefix
+        guard let olderFirst = prefix.firstSeq, prefix.lastSeq < (firstSeq ?? Int.max) else { return }
+        for (id, result) in unmatchedResults {
+            if let index = prefix.toolIndex[id] {
+                prefix.finishTool(at: index, with: result)
+                unmatchedResults.removeValue(forKey: id)
+            }
+        }
+        let offset = prefix.items.count
+        items = prefix.items + items
+        times = prefix.times.merging(times) { _, newer in newer }
+        toolIndex = prefix.toolIndex.merging(toolIndex.mapValues { $0 + offset }) { _, newer in newer }
+        unmatchedResults = prefix.unmatchedResults.merging(unmatchedResults) { _, newer in newer }
+        if !hasRunState { running = prefix.running }
+        hasRunState = hasRunState || prefix.hasRunState
+        firstSeq = olderFirst
+        lastSeq = max(lastSeq, prefix.lastSeq)
     }
 
     public mutating func apply(event: JSONValue) {
         guard let seq = Self.seq(of: event), seq > lastSeq else { return }
         lastSeq = seq
-        events.append(event)
+        if firstSeq == nil { firstSeq = seq }
+        PerfTrace.count("history_events_folded")
         let data = event["data"] ?? .null
         let time: Date? = if case .number(let ms) = event["time"] { Date(timeIntervalSince1970: ms / 1000) } else { nil }
         let before = items.count
@@ -134,16 +161,18 @@ public struct Transcript: Sendable, Equatable {
             }
         case "tool/result":
             let message = data["message"] ?? .null
-            guard let callId = message["toolCallId"]?.stringValue, let index = toolIndex[callId],
-                  case .tool(var call) = items[index]
-            else { return }
-            call.result = Self.text(of: message["content"])
-            call.isError = message["isError"]?.boolValue ?? false
-            call.finishedAt = time
-            items[index] = .tool(call)
+            guard let callId = message["toolCallId"]?.stringValue else { return }
+            let result = ToolResult(text: Self.text(of: message["content"]), isError: message["isError"]?.boolValue ?? false, time: time)
+            if let index = toolIndex[callId] {
+                finishTool(at: index, with: result)
+            } else {
+                unmatchedResults[callId] = result
+            }
         case "turn/start":
+            hasRunState = true
             running = true
         case "turn/end":
+            hasRunState = true
             running = false
             live = nil
             let kind = data["reason"]?["kind"]?.stringValue ?? "completed"
@@ -154,6 +183,14 @@ public struct Transcript: Sendable, Equatable {
         default:
             break
         }
+    }
+
+    private mutating func finishTool(at index: Int, with result: ToolResult) {
+        guard case .tool(var call) = items[index] else { return }
+        call.result = result.text
+        call.isError = result.isError
+        call.finishedAt = result.time
+        items[index] = .tool(call)
     }
 
     public mutating func apply(streamFrame frame: JSONValue) {
