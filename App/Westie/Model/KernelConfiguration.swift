@@ -19,7 +19,8 @@ struct KernelConfiguration {
         let environment = ProcessInfo.processInfo.environment
         var location = try KernelLocation.development(repoRoot: repoRoot)
         var options = KernelProcess.Options()
-        options.logFile = repoRoot.appending(path: "temp/logs/kernel.log")
+        options.logFile = environment["WESTIE_PERF_KERNEL_LOG"].map { URL(filePath: $0) }
+            ?? repoRoot.appending(path: "temp/logs/kernel.log")
 
         if let port = environment["WESTIE_MOCK_LLM"] {
             // 可用 WESTIE_DSH_HOME 另指一份测试数据，和已开着的假模型实例互不干扰。

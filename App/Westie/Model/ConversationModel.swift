@@ -39,6 +39,7 @@ final class ConversationModel {
 
     func open(on connection: KernelConnection) {
         self.connection = connection
+        PerfTrace.mark("follow_start")
         followTask = Task { [weak self, address] in
             let stream = await connection.stream("session/follow", ["request": [
                 "address": address,
@@ -58,6 +59,9 @@ final class ConversationModel {
                         self.readModelSelection(frame["projections"]?["values"]?["modelSelection"])
                     }
                     self.transcript.apply(followFrame: frame)
+                    if PerfTrace.enabled, frame["type"]?.stringValue == "snapshot" {
+                        PerfTrace.mark("follow_snapshot", ["items": Double(self.transcript.items.count)])
+                    }
                 }
             } catch {
                 self?.followError = (error as? RemoteFailure)?.message ?? String(describing: error)
@@ -85,6 +89,8 @@ final class ConversationModel {
 
     private func fetchEarlier(connection: KernelConnection, throughSeq: Int, beforeSeq: Int) async -> Bool {
         do {
+            let perfStart = PerfTrace.clock()
+            defer { if PerfTrace.enabled { PerfTrace.mark("earlier_model", ["ms": (PerfTrace.clock() - perfStart) * 1000, "items": Double(transcript.items.count)]) } }
             let page = try await connection.call("session/page", ["request": [
                 "address": address,
                 "throughSeq": .number(Double(throughSeq)),

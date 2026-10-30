@@ -43,6 +43,12 @@ enum Automation {
             return
         }
         note("ready mock=\(model.isMock)")
+        var interval: (String, PerfMonitor.Snapshot)?
+        if PerfTrace.enabled {
+            await PerfMonitor.settle()
+            PerfTrace.mark("window_layout_ready")
+            if let start = PerfMonitor.launchSnapshot { PerfMonitor.finish("startup", since: start) }
+        }
         let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer", "set", "archive", "unarchive", "pin", "rename"]
 
         for step in script.split(separator: ";").map({ $0.trimmingCharacters(in: .whitespaces) }) where !step.isEmpty {
@@ -53,7 +59,43 @@ enum Automation {
                 note("REFUSED \(step)：连的是真实数据，只允许只读步骤")
                 continue
             }
+            let perfStart = PerfTrace.enabled ? PerfMonitor.snapshot() : nil
+            if PerfTrace.enabled { PerfTrace.mark("step_begin_" + verb) }
             switch verb {
+            case "perfbegin":
+                guard PerfTrace.enabled else { continue }
+                interval = (argument, PerfMonitor.snapshot())
+                PerfTrace.mark("interval_begin_" + argument)
+            case "perfend":
+                if let (name, start) = interval {
+                    if argument != "live" { await PerfMonitor.settle() }
+                    PerfMonitor.finish("interval_" + name, since: start)
+                    interval = nil
+                }
+            case "sidebarquery":
+                NotificationCenter.default.post(name: .westiePerfQuery, object: argument)
+            case "fixturecheck":
+                let expected = Int(argument) ?? 0
+                let children = model.sessions.values.filter { $0.isSubagent }.count
+                PerfTrace.mark("fixture_check", ["sessions": Double(model.sessions.count), "children": Double(children), "pinned": Double(model.board.pinnedSessionIds.count), "archived": Double(model.board.archivedSessionIds.count)])
+                if model.sessions.count != expected || children != 60 || model.board.pinnedSessionIds.count != 10 || model.board.archivedSessionIds.count != 40 {
+                    note("FAIL fixture counts mismatch: sessions=\(model.sessions.count), children=\(children), pins=\(model.board.pinnedSessionIds.count), archives=\(model.board.archivedSessionIds.count)")
+                }
+            case "perfhistory":
+                guard PerfTrace.enabled, let conversation = model.conversation else { note("FAIL perfhistory unavailable"); continue }
+                var page = 0
+                while conversation.hasEarlierHistory {
+                    let start = PerfMonitor.snapshot()
+                    guard await conversation.loadEarlier() else { note("FAIL perfhistory \(conversation.earlierError ?? "no progress")"); break }
+                    await PerfMonitor.settle()
+                    page += 1
+                    PerfMonitor.finish("history_page_\(page)", since: start)
+                }
+                if page == 0 { note("FAIL perfhistory no pages") }
+                PerfTrace.mark("history_complete", ["pages": Double(page), "items": Double(conversation.transcript.items.count)])
+            case "refresh":
+                await model.perfRefreshSessions()
+
             case "split":
                 await until { !model.board.ordered.isEmpty }
                 let all = model.activeSessions
@@ -112,7 +154,10 @@ enum Automation {
                 guard let id = Int(argument).flatMap({ all.indices.contains($0) ? all[$0].id : nil })
                     ?? all.first(where: { $0.id == argument })?.id else { note("FAIL 没有会话 \(argument)"); continue }
                 model.selectedSessionId = id
-                await until { model.conversation?.isLoading == false }
+                let loaded = await until { model.conversation?.isLoading == false }
+                if !loaded || model.conversation?.followError != nil {
+                    note("FAIL select \(id) \(model.conversation?.followError ?? "timeout")")
+                }
             case "earlier":
                 // 往前翻页 n 次（默认翻到底），只读。
                 guard let conversation = model.conversation else { note("FAIL 没有打开的会话"); continue }
@@ -144,10 +189,11 @@ enum Automation {
                     model.conversation?.transcript.running == true || (model.conversation?.transcript.items.count ?? 0) > before
                 }
             case "idle":
-                await until(timeout: 20) {
+                let finished = await until(timeout: Double(argument) ?? 20) {
                     model.conversation?.transcript.running == false
                         || !model.approvals.isEmpty || !model.questions.isEmpty
                 }
+                if PerfTrace.enabled, !finished { note("FAIL idle timeout") }
             case "wait":
                 try? await Task.sleep(for: .seconds(Double(argument) ?? 1))
             case "approve", "reject":
@@ -166,6 +212,9 @@ enum Automation {
                     if case .process(_, let steps) = block { steps } else { nil }
                 }
                 let parts = argument.split(separator: ".").compactMap { Int($0) }
+                if PerfTrace.enabled, let index = parts.first, !processes.indices.contains(index) {
+                    note("FAIL process index \(index)"); continue
+                }
                 if verb == "process" {
                     let id = parts.first.flatMap { processes.indices.contains($0) ? processes[$0].first?.id : nil }
                     NotificationCenter.default.post(name: .westieToggleProcess, object: id)
@@ -315,6 +364,12 @@ enum Automation {
                 return
             default:
                 note("FAIL 未知步骤 \(step)")
+            }
+            if let perfStart {
+                if ["select", "earlier", "process", "step", "scroll", "sidebarquery", "refresh"].contains(verb) {
+                    await PerfMonitor.settle()
+                }
+                PerfMonitor.finish("step_" + verb, since: perfStart)
             }
             note("done \(step) | items=\(model.conversation?.transcript.items.count ?? -1) running=\(model.conversation?.transcript.running ?? false) approvals=\(model.approvals.count) questions=\(model.questions.count)")
         }

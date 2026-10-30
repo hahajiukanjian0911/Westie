@@ -32,6 +32,7 @@ struct ConversationView: View {
     }
 
     var body: some View {
+        let _ = PerfTrace.count("conversation_body")
         VStack(spacing: 0) {
             ConversationScroll(
                 scroller: scroller,
@@ -182,6 +183,7 @@ private struct ConversationContent: View {
     }
 
     var body: some View {
+        let _ = PerfTrace.count("conversation_content_body")
         TopAligned {
             column
         }

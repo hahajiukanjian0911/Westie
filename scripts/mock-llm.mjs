@@ -85,6 +85,7 @@ const plan = (body) => {
   const script = Object.entries(TOOL_SCRIPTS).find(([cue]) => text.startsWith(cue))?.[1]
   if (script) return { text: '我来调用一个工具。', tool: script }
   if (text.startsWith('/steps')) return { text: '', tool: STEPS[0] }
+  if (text.startsWith('/perfmd')) return { text: Array.from({ length: 10 }, (_, i) => `## 性能测试段落 ${i + 1}\n\n${MARKDOWN_SAMPLE}`).join('\n\n') }
   if (text.startsWith('/md')) return { text: MARKDOWN_SAMPLE }
   return { text: `这是来自本地假模型的回复。\n\n你说的是：「${text.slice(0, 200)}」\n\n- 第一点\n- 第二点\n\n\`\`\`swift\nprint("hello westie")\n\`\`\`` }
 }

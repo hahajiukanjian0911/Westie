@@ -34,7 +34,9 @@ final class ConfigStore: @unchecked Sendable {
             store.importLegacyAppearance()
             return store
         }
-        let file = KernelConfiguration.repoRoot.appending(path: "temp/automation/settings.json")
+        let file = environment["WESTIE_PERF_LOG"] != nil
+            ? ConfigHome.url.appending(path: "settings.json")
+            : KernelConfiguration.repoRoot.appending(path: "temp/automation/settings.json")
         if environment["WESTIE_LAYOUT_KEEP"] == nil { try? FileManager.default.removeItem(at: file) }
         return ConfigStore(file: file)
     }()

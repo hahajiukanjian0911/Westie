@@ -109,10 +109,12 @@ final class AppModel {
             }
         }
         phase = .starting
+        PerfTrace.mark("kernel_start")
         do {
             let kernel = KernelProcess(location: configuration.location, options: configuration.options)
             self.kernel = kernel
             let endpoint = try await kernel.start()
+            PerfTrace.mark("kernel_ready")
             // 启动途中 DSH.app 起来了：已经让位，这个内核直接停掉。
             guard phase == .starting else {
                 await kernel.stop()
@@ -178,7 +180,9 @@ final class AppModel {
     private func attach(endpoint: KernelEndpoint) async throws {
         connectionTasks.forEach { $0.cancel() }
         let connection = KernelConnection(endpoint: endpoint)
+        PerfTrace.mark("connect_start")
         let events = try await connection.connect(interactions: .answer)
+        PerfTrace.mark("connect_ready")
         self.connection = connection
         approvals = []
         questions = []
@@ -197,6 +201,7 @@ final class AppModel {
         try await refreshSessions()
         try await loadModels()
         phase = .ready
+        PerfTrace.mark("app_ready")
         Task { await settings.load() }
         conversations.values.forEach { $0.close() }
         conversations = [:]
@@ -232,8 +237,14 @@ final class AppModel {
 
     // MARK: - 会话列表
 
+    #if DEBUG
+    func perfRefreshSessions() async { if PerfTrace.enabled { try? await refreshSessions() } }
+    #endif
+
     private func refreshSessions() async throws {
         guard let connection else { return }
+        let perfStart = PerfTrace.clock()
+        defer { if PerfTrace.enabled { PerfTrace.mark("session_list", ["ms": (PerfTrace.clock() - perfStart) * 1000, "sessions": Double(sessions.count)]) } }
         let value = try await connection.call("session/list", ["_request": [:]])
         var next: [String: SessionSummary] = [:]
         for item in value["items"]?.arrayValue ?? [] {

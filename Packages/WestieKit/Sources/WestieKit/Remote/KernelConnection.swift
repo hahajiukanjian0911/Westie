@@ -74,6 +74,7 @@ public actor KernelConnection {
         else {
             throw ConnectionError.connectRejected(status: (response as? HTTPURLResponse)?.statusCode ?? -1)
         }
+        PerfTrace.mark("connect_http_ready")
         cookie = String(pair)
 
         var socketURL = URLComponents(url: endpoint.origin.appending(path: "api/remote.mux"), resolvingAgainstBaseURL: false)!

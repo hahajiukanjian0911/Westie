@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import WestieKit
 
 /// 对话列表的滚动宿主：AppKit 的 NSScrollView 包着 SwiftUI 内容，滚动位置只由 ConversationScroller 一处决定。
 ///
@@ -41,6 +42,7 @@ struct ConversationScroll<Content: View>: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: ConversationScrollView, context: Context) {
+        PerfTrace.count("hosting_update")
         context.coordinator.hosting?.rootView = content
     }
 
@@ -171,6 +173,7 @@ struct ConversationGeometry: Equatable {
     // MARK: 来自 SwiftUI 内容的测量
 
     func layoutChanged(_ value: ConversationGeometry) {
+        PerfTrace.count("geometry_layout")
         let previous = geometry
         geometry = value
         #if DEBUG

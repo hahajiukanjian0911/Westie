@@ -1,5 +1,6 @@
 import SwiftUI
 import Textual
+import WestieKit
 
 /// 回复的 Markdown 排版，按设计稿 `deliverables/Westie/reviews/2026-10-28-markdown` 实现：
 /// v1 排版——正文 14pt 常规字重、行距放宽，层级靠字号和留白；表格去竖线，代码块带语言名和悬停复制。
@@ -12,11 +13,13 @@ struct MarkdownText: View {
     @Environment(\.typography) private var typography
 
     var body: some View {
+        let _ = PerfTrace.count(streaming ? "markdown_body_stream" : "markdown_body_static")
         Group {
             if streaming {
                 // 只在流式时逐帧重画：TextRenderer 按当前时间算每段字的透明度。holdBack 只在文字变化时算
                 let visible = StreamingMarkdownParser.holdBack(text)
                 TimelineView(.animation) { context in
+                    let _ = PerfTrace.count("markdown_timeline")
                     styled(StructuredText(visible, parser: parser))
                         .textRenderer(StreamFadeRenderer(now: context.date.timeIntervalSinceReferenceDate))
                 }
@@ -304,6 +307,13 @@ final class StreamingMarkdownParser: MarkupParser {
     private var births: [Double] = []
 
     func attributedString(for input: String) throws -> AttributedString {
+        let perfStart = PerfTrace.clock()
+        defer {
+            if PerfTrace.enabled {
+                PerfTrace.count("markdown_parse")
+                PerfTrace.count("markdown_parse_ms", by: (PerfTrace.clock() - perfStart) * 1000)
+            }
+        }
         var result = try base.attributedString(for: input)
         let now = Date.timeIntervalSinceReferenceDate
         let current = Array(result.characters)

@@ -164,7 +164,12 @@ public struct Transcript: Sendable, Equatable {
             let chunk = frame["chunk"] ?? .null
             switch chunk["type"]?.stringValue {
             case "reasoning-delta": live?.reasoning += chunk["text"]?.stringValue ?? ""
-            case "text-delta": live?.text += chunk["text"]?.stringValue ?? ""
+            case "text-delta":
+                if PerfTrace.enabled {
+                    PerfTrace.count("text_deltas")
+                    PerfTrace.count("text_chars", by: Double(chunk["text"]?.stringValue?.count ?? 0))
+                }
+                live?.text += chunk["text"]?.stringValue ?? ""
             default: break
             }
         case "end":

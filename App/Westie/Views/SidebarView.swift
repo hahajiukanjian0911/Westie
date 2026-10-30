@@ -19,6 +19,7 @@ struct SidebarView: View {
     private var needle: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
+        let _ = PerfTrace.count("sidebar_body")
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 SearchField(text: $query)
@@ -43,6 +44,12 @@ struct SidebarView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 8)
         }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: .westiePerfQuery)) { note in
+            guard PerfTrace.enabled else { return }
+            query = note.object as? String ?? ""
+        }
+        #endif
         // 标题结果即时出；正文停手 300ms 后再查，换了关键词就丢掉旧结果。
         .task(id: needle) {
             contentHits = nil
@@ -53,6 +60,7 @@ struct SidebarView: View {
             let hits = (try? await model.searchContent(needle)) ?? []
             guard !Task.isCancelled else { return }
             contentHits = hits
+            if PerfTrace.enabled { PerfTrace.mark("sidebar_content_results", ["hits": Double(hits.count)]) }
         }
     }
 

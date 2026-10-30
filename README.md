@@ -63,6 +63,18 @@ open -g -j -n --env WESTIE_MOCK_LLM=3190 \
   --env WESTIE_AUTOMATION_LOG=$PWD/temp/logs/automation.log temp/DerivedData/Build/Products/Debug/Westie.app
 ```
 
+### 性能基线（后台、假数据）
+
+```sh
+xcodegen generate && xcodebuild -scheme Westie -derivedDataPath temp/DerivedData build
+python3 scripts/perf/run.py all --repeat 3
+# 单场景：startup / history / stream / sidebar；--sample 单独采集调用栈
+```
+
+流式场景用相同长 Markdown 在短、长会话各观察约 20 秒；遇到主线程阻塞按实际窗口长度报告。脚本使用本机 Node 24 和 `zstd`，首次自动用假模型生成存储样本，再建立 `temp/perf/fixtures/`（150 轮长会话、400 会话）。每轮复制独立数据与配置，全部产物在 `temp/perf/runs/<时间>/`；不访问真实数据、不合成输入、不前置窗口。已有夹具不会覆盖。`summary.json` / `summary.md` 按同一操作的独立运行给出样本数、中位与最差值。
+
+`WESTIE_PERF_LOG=<JSONL>` 只在 Debug 开启计时和计数，未设置时不安装监测器、不读时钟、不写日志；`WESTIE_PERF_KERNEL_LOG` 可隔离内核日志。CPU 以一个核心为 100%，RSS 是测量点观测值；RunLoop 活跃区间超过 50ms 是响应性代理，不等同屏幕掉帧。流式计数按实际文本 delta（假模型每片最多 6 字符），不是模型 tokenizer 的 token；解析计数覆盖自定义流式 Markdown parser，不含静态历史的解析。布局稳定检测有至少 60ms 观测底限，冷启动指新数据/profile，不清空操作系统缓存。真实首帧、键盘输入和触控板手势仍需另约前台验收。
+
 ## 许可证
 
 [MIT](LICENSE)。`Packages/Textual` 沿用其原有的 MIT 许可证（见 `Packages/Textual/LICENSE`）。

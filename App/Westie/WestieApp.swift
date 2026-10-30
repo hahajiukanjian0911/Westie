@@ -32,7 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }()
 
-    @MainActor let model = AppModel(configuration: AppDelegate.configuration)
+    @MainActor let model: AppModel = {
+        #if DEBUG
+        PerfMonitor.install()
+        #endif
+        return AppModel(configuration: AppDelegate.configuration)
+    }()
 
     /// 自动化测试的布局存在单独的配置文件里（见 `ConfigStore.shared`），不动日常使用的面板布局。
     @MainActor let layout = PanelLayout(dataScope: AppDelegate.configuration.dataScope)

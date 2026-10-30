@@ -55,13 +55,16 @@ public actor KernelProcess {
     /// 拉起内核并等待就绪，返回连接地址。已在运行时直接报错由调用方处理（不重复拉起）。
     public func start() async throws -> KernelEndpoint {
         precondition(process == nil, "kernel already started")
+        PerfTrace.mark("profile_start")
         try await ensureProfile()
+        PerfTrace.mark("profile_ready")
 
         let port = try Self.freeLoopbackPort()
         let child = makeProcess(arguments: ["--profile", Self.profileName, "--no-open", "--port", String(port)])
         let stdout = Pipe()
         child.standardOutput = stdout
         child.standardError = logHandle() ?? FileHandle.nullDevice
+        PerfTrace.mark("node_spawn")
         try child.run()
         process = child
 
