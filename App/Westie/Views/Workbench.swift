@@ -46,7 +46,6 @@ struct Workbench: View {
         .overlay(alignment: .topLeading) { sidebarToggle }
         .overlay { DragOverlay(layout: layout, model: model) }
         .coordinateSpace(.named(Self.space))
-        .ignoresSafeArea(.container, edges: .top)
         .onAppear(perform: watchAssist)
         .onDisappear {
             if let assistMonitor { NSEvent.removeMonitor(assistMonitor) }

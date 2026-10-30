@@ -25,6 +25,8 @@ struct RootView: View {
                     .transition(.opacity.animation(.easeOut(duration: 0.2)))
             }
         }
+        // 放在过渡外层：放进 Workbench 时，含原生视图的升起过渡期间不生效，顶上会空出标题栏高度，结束才跳上去。
+        .ignoresSafeArea(.container, edges: .top)
         .onChange(of: model.phase == .ready, initial: true) { _, ready in
             // 0.4 秒内就绪就直接出现，不播
             let animate = ready && Date().timeIntervalSince(launchedAt) > 0.4
