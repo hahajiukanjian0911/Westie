@@ -67,6 +67,7 @@ public actor KernelProcess {
         PerfTrace.mark("node_spawn")
         try child.run()
         process = child
+        PerfTrace.mark("node_started", ["pid": Double(child.processIdentifier)])
 
         let log = logHandle()
         let timeout = options.startupTimeout

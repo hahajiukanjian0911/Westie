@@ -71,6 +71,13 @@ def run_app(directory, home, script, port, sample=False, timeout=600):
                     except ProcessLookupError: break
                     time.sleep(.1)
                 else: raise RuntimeError(f'app did not exit: {directory}')
+                node_pid = next((int(r['pid']) for r in data if r['name'] == 'node_started'), None)
+                if node_pid is not None:
+                    for _ in range(60):
+                        try: os.kill(node_pid, 0)
+                        except ProcessLookupError: break
+                        time.sleep(.1)
+                    else: raise RuntimeError(f'kernel remained after app exit: {directory}')
                 if sampler: sampler.wait()
                 if 'FAIL' in text or 'REFUSED' in text: raise RuntimeError(f'automation failed: {directory}')
                 completed = True
@@ -107,6 +114,7 @@ def main():
     dump(output/'environment.json',{'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),'system':subprocess.check_output(['sw_vers'],text=True),'machine':subprocess.check_output(['uname','-m'],text=True),'repeat':args.repeat,'scenario':args.scenario,'sample':args.sample})
     sources=sorted((ROOT/'App/Westie').rglob('*.swift'))+sorted((ROOT/'Packages/WestieKit/Sources').rglob('*.swift'))+[ROOT/'scripts/mock-llm.mjs']
     sources += [APP/'Contents/MacOS/Westie',APP/'Contents/MacOS/Westie.debug.dylib']
+    sources += [ROOT/'scripts/perf/run.py', ROOT/'scripts/perf/summarize.py']
     dump(output/'source-sha256.json',{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources})
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]

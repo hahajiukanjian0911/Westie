@@ -46,7 +46,9 @@ enum Automation {
         var interval: (String, PerfMonitor.Snapshot)?
         if PerfTrace.enabled {
             await PerfMonitor.settle()
-            PerfTrace.mark("window_layout_ready")
+            let window = NSApp.windows.first { $0.contentView != nil && $0.title == "Westie" }
+            PerfTrace.mark("window_layout_ready", ["backing_scale": window?.backingScaleFactor ?? 0,
+                "width": window?.contentView?.bounds.width ?? 0, "height": window?.contentView?.bounds.height ?? 0])
             if let start = PerfMonitor.launchSnapshot { PerfMonitor.finish("startup", since: start) }
         }
         let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer", "set", "archive", "unarchive", "pin", "rename"]
