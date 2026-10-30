@@ -260,7 +260,6 @@ private struct WindowTile: View {
     @State private var hovering = false
     @State private var nearGrip = false
     @State private var onGrip = false
-    @State private var showingMap = false
     @State private var dropZone: SessionDropDelegate.Zone?
 
     private var focused: Bool { layout.focusedWindowId == window.id }
@@ -352,34 +351,12 @@ private struct WindowTile: View {
             title
             Spacer(minLength: 4)
             HStack(spacing: 2) {
-                Button("移动窗口", systemImage: "square.grid.3x1.below.line.grid.1x2") { showingMap = true }
-                    .help("移动窗口")
-                    .popover(isPresented: $showingMap, arrowEdge: .bottom) {
-                        LayoutMap(current: panel, layout: layout, interactive: true) { target in
-                            showingMap = false
-                            layout.hoverTarget = nil
-                            guard target != panel else { return }
-                            withAnimation(Workbench.settle) { layout.move(window.id, to: target) }
-                        } onHover: { target in
-                            layout.hoverTarget = target.map { layout.appendTarget($0, dragging: window.id) }
-                        }
-                        .padding(8)
-                    }
-                    .onChange(of: showingMap) { if !showingMap { layout.hoverTarget = nil } }
-                Menu {
-                    moreItems
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuIndicator(.hidden)
-                .help("窗口操作")
                 Button("关闭窗口", systemImage: "xmark") { layout.close(window.id) }
                     .help("关闭窗口")
             }
             .labelStyle(.iconOnly)
             .buttonStyle(IconButtonStyle())
-            .menuStyle(.button)
-            .opacity(hovering || showingMap ? 1 : 0)
+            .opacity(hovering ? 1 : 0)
             .animation(.easeOut(duration: 0.16), value: hovering)
         }
         .padding(.leading, leading)
@@ -456,12 +433,6 @@ private struct WindowTile: View {
             .fixedSize()
             .help("切换窗口")
         }
-    }
-
-    @ViewBuilder
-    private var moreItems: some View {
-        Button("收起窗口") { layout.hide(window.id) }
-        Button("关闭窗口") { layout.close(window.id) }
     }
 
     @ViewBuilder
