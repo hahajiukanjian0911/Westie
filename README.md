@@ -69,6 +69,7 @@ open -g -j -n --env WESTIE_MOCK_LLM=3190 \
 xcodegen generate && xcodebuild -scheme Westie -derivedDataPath temp/DerivedData build
 python3 scripts/perf/run.py all --repeat 3
 # 单场景：startup / history / stream / sidebar；--sample 单独采集调用栈
+scripts/perf/try-long.sh   # 前台手动验收：假模型 + 夹具副本打开 App，长会话为「Perf 0 synthetic」
 ```
 
 流式场景用相同长 Markdown 在短、长会话各观察约 20 秒；遇到主线程阻塞按实际窗口长度报告。脚本使用本机 Node 24 和 `zstd`，首次自动用假模型生成存储样本，再建立 `temp/perf/fixtures/`（150 轮长会话、400 会话）。每轮复制独立数据与配置，全部产物在 `temp/perf/runs/<时间>/`；不访问真实数据、不合成输入、不前置窗口。已有夹具不会覆盖。`summary.json` / `summary.md` 按同一操作的独立运行给出样本数、中位与最差值。
