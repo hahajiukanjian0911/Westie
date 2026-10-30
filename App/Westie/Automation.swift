@@ -153,14 +153,22 @@ enum Automation {
                     let hidden = layout.hiddenWindows(in: panel).map { $0.content.title(model: model) }
                     note("panel \(panel.rawValue) visible=\(layout.isVisible(panel)) shown=[\(shown.joined(separator: ", "))] hidden=[\(hidden.joined(separator: ", "))]")
                 }
-            case "select":
+            case "select", "selectframes":
+                let arguments = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                let selection = arguments[0]
                 trace("select \(argument)")
                 await until { !model.board.ordered.isEmpty }
                 let all = model.activeSessions
                 // 序号或会话 id
-                guard let id = Int(argument).flatMap({ all.indices.contains($0) ? all[$0].id : nil })
-                    ?? all.first(where: { $0.id == argument })?.id else { note("FAIL 没有会话 \(argument)"); continue }
+                guard let id = Int(selection).flatMap({ all.indices.contains($0) ? all[$0].id : nil })
+                    ?? all.first(where: { $0.id == selection })?.id else { note("FAIL 没有会话 \(selection)"); continue }
+                let presentedBefore = PerfTrace.counters()["conversation_layout_presented", default: 0]
                 model.selectedSessionId = id
+                if verb == "selectframes", arguments.count == 2 {
+                    await frames(to: URL(filePath: arguments[1]), ready: PerfTrace.enabled ? {
+                        PerfTrace.counters()["conversation_layout_presented", default: 0] > presentedBefore
+                    } : nil)
+                }
                 let loaded = await until { model.conversation?.isLoading == false }
                 if !loaded || model.conversation?.followError != nil {
                     note("FAIL select \(id) \(model.conversation?.followError ?? "timeout")")
@@ -213,16 +221,17 @@ enum Automation {
                 }
             case "scroll":
                 NotificationCenter.default.post(name: .westieScrollTo, object: CGFloat(Double(argument) ?? 0))
-            case "process", "step":
+            case "process", "step", "processframes":
                 // process[:k] 切换第 k 个过程块（从 0 数，省略为全部）；step:k.i 切换第 k 个过程块的第 i 步
                 let processes = (model.conversation?.transcript.blocks ?? []).compactMap { block -> [Transcript.Item]? in
                     if case .process(_, let steps) = block { steps } else { nil }
                 }
-                let parts = argument.split(separator: ".").compactMap { Int($0) }
+                let arguments = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                let parts = (arguments.first ?? "").split(separator: ".").compactMap { Int($0) }
                 if PerfTrace.enabled, let index = parts.first, !processes.indices.contains(index) {
                     note("FAIL process index \(index)"); continue
                 }
-                if verb == "process" {
+                if verb != "step" {
                     let id = parts.first.flatMap { processes.indices.contains($0) ? processes[$0].first?.id : nil }
                     NotificationCenter.default.post(name: .westieToggleProcess, object: id)
                 } else if parts.count == 2, processes.indices.contains(parts[0]), processes[parts[0]].indices.contains(parts[1]) {
@@ -230,6 +239,7 @@ enum Automation {
                 } else {
                     note("FAIL step \(argument)")
                 }
+                if verb == "processframes", arguments.count == 2 { await frames(to: URL(filePath: arguments[1])) }
             case "shot":
                 try? await Task.sleep(for: .milliseconds(400))
                 note(snapshot(to: URL(filePath: argument)) ? "shot \(argument)" : "FAIL shot \(argument)")
@@ -422,6 +432,29 @@ enum Automation {
     }
 
     /// 把主窗口内容渲染成 PNG（cacheDisplay 不需要屏幕录制权限，也不激活窗口）。
+    /// 诊断帧只截 App 自己的内容，记录真实采样时间；缓存绘制不是前台显示器录屏。
+    private static func frames(to directory: URL, ready: (() -> Bool)? = nil) async {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let start = ProcessInfo.processInfo.systemUptime
+        var samples: [[String: Double]] = []
+        var readyAt: Double?
+        repeat {
+            let index = samples.count
+            let before = ProcessInfo.processInfo.systemUptime - start
+            let ok = snapshot(to: directory.appending(path: String(format: "%03d.png", index)))
+            samples.append(["index": Double(index), "start": before,
+                            "end": ProcessInfo.processInfo.systemUptime - start, "ok": ok ? 1 : 0])
+            trace("cache frame \(directory.lastPathComponent) \(index)")
+            if readyAt == nil, ready?() == true { readyAt = ProcessInfo.processInfo.systemUptime - start }
+            try? await Task.sleep(for: .milliseconds(16))
+        } while ProcessInfo.processInfo.systemUptime - start < 10
+            && (ProcessInfo.processInfo.systemUptime - start < 1.4
+                || (ready != nil && ProcessInfo.processInfo.systemUptime - start - (readyAt ?? 10) < 0.3))
+        if let data = try? JSONSerialization.data(withJSONObject: samples, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: directory.appending(path: "frames.json"))
+        }
+    }
+
     private static func snapshot(to url: URL) -> Bool {
         guard let view = NSApp.windows.first(where: { $0.contentView != nil && $0.title == "Westie" })?.contentView
             ?? NSApp.windows.first?.contentView,
