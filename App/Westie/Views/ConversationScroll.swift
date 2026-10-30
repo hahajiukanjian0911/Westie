@@ -141,6 +141,14 @@ struct ConversationScroll<Content: View & Equatable>: NSViewRepresentable {
             loaded: loaded, onReady: onReady)
     }
 
+    // 这里是由外层分配尺寸的视口；文档的自然高度不能参与 SwiftUI 对视口的尺寸探测。
+    // 否则默认 fittingSize 会遍历全部轮的 Auto Layout 子树，流式时仍随历史长度增长。
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ConversationScrollView, context: Context) -> CGSize? {
+        let size = proposal.replacingUnspecifiedDimensions(by: nsView.frame.size)
+        return CGSize(width: size.width.isFinite ? size.width : nsView.frame.width,
+                      height: size.height.isFinite ? size.height : nsView.frame.height)
+    }
+
     static func dismantleNSView(_ scrollView: ConversationScrollView, coordinator: ()) {
         scrollView.scroller?.detach()
         scrollView.documentView = nil

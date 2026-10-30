@@ -111,6 +111,7 @@ import SwiftUI
         ephemeral = nil
         expect(released == nil && orphanTimer?.isValid == false, "析构失效RunLoop持有的Timer")
         chunkChecks()
+        viewportChecks()
         print("\(checks) checks passed")
     }
     @MainActor @Observable final class ChunkState {
@@ -182,6 +183,35 @@ import SwiftUI
         expect(document.subviews.contains { $0 === aView } && document.subviews.contains { $0 === bView }, "顶部插入复用已有宿主")
         expect(abs(scroll.contentView.bounds.minY - before - 416) < 0.01, "切块分页只补偿新块高度及间距")
         expect(abs(bView.frame.minY - 1040) < 0.01, "分页下方块仅平移不重复测量")
+        scroller.detach()
+    }
+
+    /// 真实 SwiftUI 父布局分配视口，覆盖 sizeThatFits 的有限/未指定提案及窗口伸缩。
+    static func viewportChecks() {
+        let scroller = ConversationScroller()
+        let state = ChunkState("viewport", 1200)
+        let shell = NSHostingView(rootView: VStack(spacing: 0) {
+            ConversationScroll(scroller: scroller,
+                chunks: [ConversationChunk(id: state.id, content: ChunkContent(state: state))],
+                firstSeq: 1, lastUserId: state.id, columnWidth: nil, loaded: true, onReady: {})
+            Color.clear.frame(height: 80)
+        })
+        shell.sizingOptions = []
+        func findScroll(_ view: NSView) -> ConversationScrollView? {
+            if let scroll = view as? ConversationScrollView { return scroll }
+            return view.subviews.lazy.compactMap(findScroll).first
+        }
+        func resize(_ size: CGSize) -> ConversationScrollView? {
+            shell.setFrameSize(size)
+            for _ in 0..<5 { shell.layoutSubtreeIfNeeded(); runLoop(for: 0.03) }
+            return findScroll(shell)
+        }
+        let first = resize(CGSize(width: 600, height: 500))
+        expect(first?.frame.size == CGSize(width: 600, height: 420), "SwiftUI父布局分配视口而非文档自然高度")
+        let larger = resize(CGSize(width: 900, height: 800))
+        expect(larger === first && larger?.frame.size == CGSize(width: 900, height: 720), "视口随父布局增大且复用滚动宿主")
+        let smaller = resize(CGSize(width: 400, height: 300))
+        expect(smaller === first && smaller?.frame.size == CGSize(width: 400, height: 220), "视口随父布局缩小且保留输入区高度")
         scroller.detach()
     }
 
