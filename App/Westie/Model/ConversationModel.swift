@@ -6,6 +6,9 @@ import WestieKit
 @MainActor @Observable
 final class ConversationModel {
     let sessionId: String
+    /// 子 Agent 会话的父会话：内核要求带上它才肯读取，且这类会话只能查看。
+    let parentSessionId: String?
+    var isReadOnly: Bool { parentSessionId != nil }
     private(set) var transcript = Transcript()
     private(set) var isLoading = true
     private(set) var hasEarlierHistory = false
@@ -23,15 +26,23 @@ final class ConversationModel {
     /// 跟读开场快照的日志截点；往前翻页都以它为 throughSeq，保证各页拼起来连续。
     private var historyCursor: Int?
 
-    init(sessionId: String) {
+    init(sessionId: String, parentSessionId: String? = nil) {
         self.sessionId = sessionId
+        self.parentSessionId = parentSessionId
+    }
+
+    private var address: JSONValue {
+        if let parentSessionId {
+            return ["kind": "subagent", "parentSessionId": .string(parentSessionId), "childSessionId": .string(sessionId), "mode": "unknown"]
+        }
+        return ["kind": "session", "sessionId": .string(sessionId)]
     }
 
     func open(on connection: KernelConnection) {
         self.connection = connection
-        followTask = Task { [weak self, sessionId] in
+        followTask = Task { [weak self, address] in
             let stream = await connection.stream("session/follow", ["request": [
-                "address": ["kind": "session", "sessionId": .string(sessionId)],
+                "address": address,
                 "assistantStream": true,
                 // 对话列表是一次排完的 VStack（展开不抖），首屏只取最近一段，往上翻再分页
                 "maxMessages": .number(60),
@@ -76,7 +87,7 @@ final class ConversationModel {
     private func fetchEarlier(connection: KernelConnection, throughSeq: Int, beforeSeq: Int) async -> Bool {
         do {
             let page = try await connection.call("session/page", ["request": [
-                "address": ["kind": "session", "sessionId": .string(sessionId)],
+                "address": address,
                 "throughSeq": .number(Double(throughSeq)),
                 "beforeSeq": .number(Double(beforeSeq)),
                 "maxMessages": .number(120),

@@ -7,20 +7,37 @@ struct NewSessionPanel: View {
     let model: AppModel
     @Environment(\.palette) private var palette
     @State private var query = ""
-    @State private var selection = 0
+    /// 选中项按工作区 id 记：后台有新活动让顺序变了，回车仍在原来选的工作区新建。
+    @State private var selection: String?
+    /// 打开时定下的顺序，面板开着期间不跟着后台活动重排。
+    @State private var order: [String] = []
     @FocusState private var focused: Bool
 
-    private enum Item: Hashable {
+    private enum Item: Identifiable {
         case workspace(Workspace)
         case add
+
+        var id: String {
+            switch self {
+            case .workspace(let workspace): workspace.id
+            case .add: "add"
+            }
+        }
     }
 
     private var items: [Item] {
         let needle = query.trimmingCharacters(in: .whitespaces)
-        let workspaces = model.workspacesByRecent.filter {
+        let recent = model.workspacesByRecent
+        let sorted = recent.sorted { (order.firstIndex(of: $0.id) ?? .max) < (order.firstIndex(of: $1.id) ?? .max) }
+        let workspaces = sorted.filter {
             needle.isEmpty || $0.displayTitle.localizedCaseInsensitiveContains(needle) || $0.path.localizedCaseInsensitiveContains(needle)
         }
         return workspaces.map(Item.workspace) + [.add]
+    }
+
+    private var selectedIndex: Int {
+        let list = items
+        return list.firstIndex { $0.id == selection } ?? 0
     }
 
     var body: some View {
@@ -31,7 +48,10 @@ struct NewSessionPanel: View {
             panel
                 .padding(.top, 96)
         }
-        .onAppear { focused = true }
+        .onAppear {
+            order = model.workspacesByRecent.map(\.id)
+            focused = true
+        }
     }
 
     private var panel: some View {
@@ -42,11 +62,11 @@ struct NewSessionPanel: View {
                     .textFieldStyle(.plain)
                     .uiFont(15)
                     .focused($focused)
-                    .onChange(of: query) { selection = 0 }
+                    .onChange(of: query) { selection = nil }
                     .onKeyPress(.upArrow) { move(-1) }
                     .onKeyPress(.downArrow) { move(1) }
                     .onKeyPress(.return) {
-                        choose(items[min(selection, items.count - 1)])
+                        choose(items[selectedIndex])
                         return .handled
                     }
                     .onKeyPress(.escape) {
@@ -71,17 +91,23 @@ struct NewSessionPanel: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .padding(.bottom, 4)
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element) { index, item in
-                        if item == .add, index > 0 {
-                            Rectangle().fill(palette.ink5.opacity(0.5)).frame(height: 0.5).padding(.horizontal, 10).padding(.vertical, 4)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            if case .add = item, index > 0 {
+                                Rectangle().fill(palette.ink5.opacity(0.5)).frame(height: 0.5).padding(.horizontal, 10).padding(.vertical, 4)
+                            }
+                            row(item, index: index).id(item.id)
                         }
-                        row(item, index: index)
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 6)
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 6)
+                // 方向键选到视野外时跟着滚过去
+                .onChange(of: selection) { _, id in
+                    if let id { proxy.scrollTo(id) }
+                }
             }
             .scrollIndicators(.never)
             .frame(maxHeight: 420)
@@ -96,7 +122,7 @@ struct NewSessionPanel: View {
 
     @ViewBuilder
     private func row(_ item: Item, index: Int) -> some View {
-        let selected = index == selection
+        let selected = index == selectedIndex
         Button { choose(item) } label: {
             HStack(spacing: 10) {
                 switch item {
@@ -126,12 +152,12 @@ struct NewSessionPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { if $0 { selection = index } }
+        .onHover { if $0 { selection = item.id } }
     }
 
     private func move(_ delta: Int) -> KeyPress.Result {
-        let count = items.count
-        selection = (selection + delta + count) % count
+        let list = items
+        selection = list[(selectedIndex + delta + list.count) % list.count].id
         return .handled
     }
 

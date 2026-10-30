@@ -6,6 +6,8 @@ struct ConversationView: View {
     @Environment(\.typography) private var typography
     let model: AppModel
     let conversation: ConversationModel
+    /// 在当前窗口换成另一个会话（子 Agent 会话底部「回到父会话」用）。
+    var openSession: (String) -> Void = { _ in }
     /// 滚动位置的唯一协调者（ConversationScroll.swift）：跟随底部、发出时顶到上方、点开收起原地不动都在那里。
     @State private var scroller = ConversationScroller()
     @State private var showsBackToBottom = false
@@ -111,12 +113,40 @@ struct ConversationView: View {
                 scroller.refreshMetrics()
             }
 
-            ComposerView(model: model, conversation: conversation, running: running)
+            Group {
+                if let parentId = conversation.parentSessionId {
+                    ReadOnlyBar(parentTitle: model.sessions[parentId]?.displayTitle ?? "父会话") { openSession(parentId) }
+                } else {
+                    ComposerView(model: model, conversation: conversation, running: running)
+                }
+            }
                 .frame(maxWidth: typography.chatColumnWidth)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
                 .frame(maxWidth: .infinity)
         }
+    }
+}
+
+/// 子 Agent 会话不能直接发消息：输入框换成一行说明和回到父会话的按钮。
+private struct ReadOnlyBar: View {
+    let parentTitle: String
+    let back: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("子代理的会话只能查看").foregroundStyle(palette.ink4)
+            Button(action: back) {
+                Text("回到「\(parentTitle)」").lineLimit(1).foregroundStyle(palette.ink2)
+                    .padding(.horizontal, 6).padding(.vertical, 2).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .uiFont(12.5)
+        .frame(maxWidth: .infinity)
+        .frame(height: 44)
+        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(palette.ink5.opacity(0.5), lineWidth: 0.5) }
     }
 }
 

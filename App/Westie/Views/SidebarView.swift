@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import WestieKit
 
-/// 会话列表窗口：直接坐在外框上（设计稿 2026-10-29-session-list v1）。
-/// 进行中的会话不分组、按最近活动排成一列，工作区是每行的标识；闲置的沉到底部「归档」。
+/// 会话列表窗口：直接坐在外框上（设计稿 2026-10-29-session-list v1、v2）。
+/// 置顶的会话排在最前，其余不分组、按最近活动排成一列，工作区是每行的标识；闲置的沉到底部「归档」。
 struct SidebarView: View {
     @Bindable var model: AppModel
     let layout: PanelLayout
@@ -12,6 +12,11 @@ struct SidebarView: View {
     @State private var query = ""
     @State private var expanded: Set<String> = []
     @State private var archiveOpen = false
+    @State private var renaming: String?
+    /// 正文命中；nil 表示还在查。
+    @State private var contentHits: [AppModel.SearchHit]?
+
+    private var needle: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +31,7 @@ struct SidebarView: View {
             .padding(.bottom, 10)
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 VStack(spacing: 0) {
-                    if query.isEmpty {
+                    if needle.isEmpty {
                         sessionList(now: context.date)
                         archive(now: context.date)
                     } else {
@@ -38,6 +43,17 @@ struct SidebarView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 8)
         }
+        // 标题结果即时出；正文停手 300ms 后再查，换了关键词就丢掉旧结果。
+        .task(id: needle) {
+            contentHits = nil
+            guard !needle.isEmpty else { return }
+            guard model.contentSearchAvailable else { contentHits = []; return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let hits = (try? await model.searchContent(needle)) ?? []
+            guard !Task.isCancelled else { return }
+            contentHits = hits
+        }
     }
 
     /// 设置卡片正聚焦时，入口跟会话行一样高亮。
@@ -46,19 +62,33 @@ struct SidebarView: View {
     }
 
     private func sessionList(now: Date) -> some View {
-        ScrollViewReader { proxy in
+        let pinned = model.pinnedSessions
+        let timeline = model.timelineSessions
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(model.activeSessions) { session in
-                        sessionRow(session, now: now).id(session.id)
+                    ForEach(pinned) { session in
+                        sessionGroup(session, now: now)
+                    }
+                    if !pinned.isEmpty, !timeline.isEmpty {
+                        Rectangle().fill(palette.ink5.opacity(0.5)).frame(height: 0.5)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                    }
+                    ForEach(timeline) { session in
+                        sessionGroup(session, now: now)
                     }
                 }
                 .padding(.bottom, 8)
             }
-            // 新建或从别处选中的会话滚进视野（新会话排在最上面）。
+            // 新建、恢复或从别处选中的会话滚进视野；选中的是子 Agent 会话就先展开它的父会话。
             .onChange(of: model.selectedSessionId) { _, id in
-                guard let id, model.activeSessions.contains(where: { $0.id == id }) else { return }
-                withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { proxy.scrollTo(id) }
+                guard let id, let session = model.sessions[id] else { return }
+                let owner = model.topLevelAncestor(of: session)
+                guard model.activeSessions.contains(where: { $0.id == owner.id }) else { return }
+                if owner.id != id { expanded.insert(owner.id) }
+                Task { @MainActor in
+                    withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { proxy.scrollTo(id) }
+                }
             }
         }
         .scrollIndicators(.never)
@@ -68,35 +98,61 @@ struct SidebarView: View {
         .frame(maxHeight: .infinity)
     }
 
-    @ViewBuilder
-    private func sessionRow(_ session: SessionSummary, now: Date) -> some View {
+    /// 一个会话行，展开时下面跟着它的子 Agent 会话。
+    private func sessionGroup(_ session: SessionSummary, now: Date) -> some View {
         let children = model.children(of: session.id)
+        return VStack(alignment: .leading, spacing: 2) {
+            sessionRow(session, now: now, children: children.count)
+            if expanded.contains(session.id) {
+                ForEach(children) { child in
+                    childRow(child)
+                }
+            }
+        }
+        .id(session.id)
+    }
+
+    private func sessionRow(_ session: SessionSummary, now: Date, children: Int) -> some View {
         SessionRow(
             session: session,
             workspace: model.workspace(for: session),
+            lastActive: model.lastActive(session),
             now: now,
-            pending: model.pendingCount(for: session.id),
+            pending: model.pendingCountIncludingChildren(for: session.id),
+            busy: model.isBusy(session),
+            pinned: model.isPinned(session.id),
             selected: session.id == model.selectedSessionId,
-            children: children.count,
+            children: children,
             expanded: expanded.contains(session.id),
+            renaming: Binding(get: { renaming == session.id }, set: { if !$0 { renaming = nil } }),
             open: { open(session.id) },
             archive: { Task { await model.archive(session.id) } },
+            togglePin: { Task { await model.togglePin(session.id) } },
+            rename: { title in Task { await model.rename(session.id, to: title) } },
+            startRename: { renaming = session.id },
             toggleChildren: {
                 withAnimation(reduceMotion ? nil : .spring(duration: 0.24)) {
                     if expanded.contains(session.id) { expanded.remove(session.id) } else { expanded.insert(session.id) }
                 }
             }
         )
-        .contextMenu { menu(for: session, archived: false) }
-        if expanded.contains(session.id) {
-            ForEach(children) { child in
-                ChildRow(session: child, selected: child.id == model.selectedSessionId) { open(child.id) }
-                    .contextMenu {
-                        Button("在新窗口打开") { layout.openConversation(child.id, mode: .newWindow) }
-                        Button("并排打开") { layout.openConversation(child.id, mode: .sideBySide) }
-                    }
-            }
+        .draggable(SessionDrag.payload(session.id)) {
+            Text(session.displayTitle).uiFont(13).lineLimit(1)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(palette.box, in: .rect(cornerRadius: Metrics.rowRadius))
         }
+        .contextMenu { menu(for: session, archived: false) }
+    }
+
+    private func childRow(_ child: SessionSummary) -> some View {
+        ChildRow(session: child, selected: child.id == model.selectedSessionId,
+                 pending: model.pendingCount(for: child.id)) { open(child.id) }
+            .id(child.id)
+            .draggable(SessionDrag.payload(child.id))
+            .contextMenu {
+                Button("在新窗口打开") { layout.openConversation(child.id, mode: .newWindow) }
+                Button("并排打开") { layout.openConversation(child.id, mode: .sideBySide) }
+            }
     }
 
     /// 底部「归档」：平时一行，展开后和上面的列表各占一半，行改成单行。
@@ -126,11 +182,7 @@ struct SidebarView: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(archived) { session in
-                            ArchivedRow(session: session, workspace: model.workspace(for: session), now: now,
-                                        selected: session.id == model.selectedSessionId,
-                                        open: { open(session.id) },
-                                        restore: { Task { await model.unarchive(session.id) } })
-                                .contextMenu { menu(for: session, archived: true) }
+                            archivedRow(session, now: now)
                         }
                     }
                     .padding(.bottom, 8)
@@ -143,37 +195,57 @@ struct SidebarView: View {
         .frame(maxHeight: archiveOpen ? .infinity : nil)
     }
 
-    /// 搜索同时找进行中和已归档的会话，匹配标题或工作区名。
+    private func archivedRow(_ session: SessionSummary, now: Date) -> some View {
+        ArchivedRow(session: session, workspace: model.workspace(for: session), lastActive: model.lastActive(session), now: now,
+                    selected: session.id == model.selectedSessionId,
+                    open: { open(session.id) },
+                    restore: { restore(session.id) })
+            .contextMenu { menu(for: session, archived: true) }
+    }
+
+    /// 搜索：先即时匹配标题和工作区名（进行中、已归档、子 Agent 会话都算），再补上正文命中的会话和一段原文。
     private func searchResults(now: Date) -> some View {
-        let needle = query.trimmingCharacters(in: .whitespaces)
         func matches(_ session: SessionSummary) -> Bool {
             session.displayTitle.localizedCaseInsensitiveContains(needle)
                 || (model.workspace(for: session)?.displayTitle.localizedCaseInsensitiveContains(needle) ?? false)
         }
         let active = model.activeSessions.filter(matches)
         let archived = model.archivedSessions.filter(matches)
+        let children = model.sessions.values.filter { $0.isSubagent && matches($0) }.sorted { model.lastActive($0) > model.lastActive($1) }
+        let shown = Set((active + archived + children).map(\.id))
+        let content = (contentHits ?? []).filter { !shown.contains($0.sessionId) && model.sessions[$0.sessionId] != nil }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
                 ForEach(active) { session in
-                    SessionRow(session: session, workspace: model.workspace(for: session), now: now,
-                               pending: model.pendingCount(for: session.id),
-                               selected: session.id == model.selectedSessionId,
-                               children: 0, expanded: false,
-                               open: { open(session.id) }, archive: { Task { await model.archive(session.id) } }, toggleChildren: {})
-                        .contextMenu { menu(for: session, archived: false) }
+                    sessionRow(session, now: now, children: 0)
+                }
+                ForEach(children) { child in
+                    childRow(child)
                 }
                 if !archived.isEmpty {
-                    Text("已归档").uiFont(11).foregroundStyle(palette.ink4)
-                        .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 4)
+                    groupLabel("已归档")
                     ForEach(archived) { session in
-                        ArchivedRow(session: session, workspace: model.workspace(for: session), now: now,
-                                    selected: session.id == model.selectedSessionId,
-                                    open: { open(session.id) },
-                                    restore: { Task { await model.unarchive(session.id) } })
-                            .contextMenu { menu(for: session, archived: true) }
+                        archivedRow(session, now: now)
                     }
                 }
-                if active.isEmpty, archived.isEmpty {
+                if contentHits == nil, model.contentSearchAvailable {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text("正在搜索内容…")
+                    }
+                    .uiFont(11).foregroundStyle(palette.ink4)
+                    .padding(.horizontal, 8).padding(.top, 10)
+                } else if !content.isEmpty {
+                    groupLabel("内容")
+                    ForEach(content) { hit in
+                        if let session = model.sessions[hit.sessionId] {
+                            ContentHitRow(session: session, workspace: model.workspace(for: session),
+                                          lastActive: model.lastActive(session), now: now, snippet: hit.snippet, needle: needle,
+                                          selected: session.id == model.selectedSessionId) { open(session.id) }
+                        }
+                    }
+                }
+                if contentHits != nil, active.isEmpty, archived.isEmpty, children.isEmpty, content.isEmpty {
                     Text("没有找到「\(needle)」").uiFont(12.5).foregroundStyle(palette.ink4)
                         .frame(maxWidth: .infinity).padding(.vertical, 24)
                 }
@@ -184,13 +256,26 @@ struct SidebarView: View {
         .frame(maxHeight: .infinity)
     }
 
+    private func groupLabel(_ text: String) -> some View {
+        Text(text).uiFont(11).foregroundStyle(palette.ink4)
+            .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 4)
+    }
+
     @ViewBuilder
     private func menu(for session: SessionSummary, archived: Bool) -> some View {
         Button("在新窗口打开") { layout.openConversation(session.id, mode: .newWindow) }
         Button("并排打开") { layout.openConversation(session.id, mode: .sideBySide) }
         Divider()
+        if !archived {
+            Button(model.isPinned(session.id) ? "取消置顶" : "置顶") { Task { await model.togglePin(session.id) } }
+            Button("重命名") { renaming = session.id }
+        }
+        Button("从这里分叉") {
+            Task { if let id = await model.fork(session.id) { layout.openConversation(id) } }
+        }
+        Divider()
         if archived {
-            Button("恢复") { Task { await model.unarchive(session.id) } }
+            Button("恢复") { restore(session.id) }
         } else {
             Button("归档") { Task { await model.archive(session.id) } }
         }
@@ -199,6 +284,14 @@ struct SidebarView: View {
     private func open(_ id: String) {
         model.selectedSessionId = id
         layout.openConversation(id)
+    }
+
+    /// 恢复后它排到时间线最上面，并打开它。
+    private func restore(_ id: String) {
+        Task {
+            guard await model.unarchive(id) else { return }
+            open(id)
+        }
     }
 
     /// 选文件夹添加工作区；`thenNewSession` 时加好后直接在里面新建会话（⌘N 面板的「添加工作区…」）。
@@ -210,6 +303,18 @@ struct SidebarView: View {
         panel.prompt = "添加工作区"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await model.addWorkspace(path: url.path(percentEncoded: false), thenNewSession: thenNewSession) }
+    }
+}
+
+/// 从侧栏拖出的会话：放到对话窗口上就在那里打开，放到右侧三分之一就并排打开。
+/// 拖的是带前缀的纯文本，不用另外登记文件类型；落点只认这个前缀。
+enum SessionDrag {
+    static let prefix = "westie-session:"
+
+    static func payload(_ sessionId: String) -> String { prefix + sessionId }
+
+    static func sessionId(from text: String) -> String? {
+        text.hasPrefix(prefix) ? String(text.dropFirst(prefix.count)) : nil
     }
 }
 
@@ -339,20 +444,30 @@ private struct SettingsEntry: View {
     }
 }
 
-/// 主列表一行：上层是工作区标识与时间（运行中、待确认时换成状态，悬停时换成归档按钮），下层是标题。
+/// 主列表一行：上层是工作区标识与时间（运行中、待确认时换成状态，悬停时换成置顶、归档按钮），下层是标题。
+/// 置顶的会话时间前多一枚图钉；重命名时标题原地变成输入框。
 private struct SessionRow: View {
     let session: SessionSummary
     let workspace: Workspace?
+    let lastActive: Date
     let now: Date
     let pending: Int
+    let busy: Bool
+    let pinned: Bool
     let selected: Bool
     let children: Int
     let expanded: Bool
+    @Binding var renaming: Bool
     let open: () -> Void
     let archive: () -> Void
+    let togglePin: () -> Void
+    let rename: (String) -> Void
+    let startRename: () -> Void
     let toggleChildren: () -> Void
     @Environment(\.palette) private var palette
     @State private var hovering = false
+    @State private var draft = ""
+    @FocusState private var editing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -363,25 +478,45 @@ private struct SessionRow: View {
                     .foregroundStyle(palette.ink3)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if hovering, !session.running {
-                    Button("归档", systemImage: "archivebox", action: archive)
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
-                        .uiFont(11.5)
-                        .foregroundStyle(palette.ink3)
-                        .frame(width: 20, height: 16)
-                        .contentShape(Rectangle())
-                        .help("归档")
+                if hovering, !renaming {
+                    HStack(spacing: 1) {
+                        rowButton(pinned ? "取消置顶" : "置顶", icon: pinned ? "pin.fill" : "pin", action: togglePin)
+                        if !busy { rowButton("归档", icon: "archivebox", action: archive) }
+                    }
                 } else {
                     status
                 }
             }
             .frame(height: 16)
             HStack(spacing: 4) {
-                Text(session.displayTitle)
-                    .uiFont(13)
-                    .lineLimit(1)
-                    .foregroundStyle(selected || hovering ? palette.ink : session.blank ? palette.ink3 : palette.ink2)
+                if renaming {
+                    TextField("", text: $draft)
+                        .textFieldStyle(.plain)
+                        .uiFont(13)
+                        .foregroundStyle(palette.ink)
+                        .focused($editing)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(palette.box, in: .rect(cornerRadius: 4))
+                        .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(palette.boxStroke, lineWidth: 0.5) }
+                        .padding(.horizontal, -4)
+                        .padding(.vertical, -1)
+                        .onSubmit(finish)
+                        .onKeyPress(.escape) {
+                            renaming = false
+                            return .handled
+                        }
+                        .onChange(of: editing) { _, focused in if !focused, renaming { finish() } }
+                        .onAppear {
+                            draft = session.title ?? ""
+                            editing = true
+                        }
+                } else {
+                    Text(session.displayTitle)
+                        .uiFont(13)
+                        .lineLimit(1)
+                        .foregroundStyle(selected || hovering ? palette.ink : session.blank ? palette.ink3 : palette.ink2)
+                }
                 Spacer(minLength: 4)
                 if children > 0 {
                     Button(action: toggleChildren) {
@@ -398,17 +533,35 @@ private struct SessionRow: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("子会话")
+                    .help("子代理会话")
                 }
             }
+            .frame(height: 18)
         }
         .padding(.horizontal, 8)
         .padding(.top, 7)
         .padding(.bottom, 8)
         .background { RowBackground(selected: selected, hovering: hovering) }
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) { if !session.blank { startRename() } }
         .onTapGesture(perform: open)
         .onHover { hovering = $0 }
+    }
+
+    private func finish() {
+        renaming = false
+        rename(draft)
+    }
+
+    private func rowButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(title, systemImage: icon, action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .uiFont(11.5)
+            .foregroundStyle(palette.ink3)
+            .frame(width: 20, height: 16)
+            .contentShape(Rectangle())
+            .help(title)
     }
 
     @ViewBuilder
@@ -420,7 +573,7 @@ private struct SessionRow: View {
             }
             .uiFont(11)
             .foregroundStyle(palette.ink2)
-        } else if session.running {
+        } else if busy {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini).tint(palette.accent)
                 Text("运行中")
@@ -428,11 +581,65 @@ private struct SessionRow: View {
             .uiFont(11)
             .foregroundStyle(palette.accent)
         } else if !session.blank {
-            Text(shortAge(session.updatedAt, now: now))
-                .uiFont(11)
-                .monospacedDigit()
-                .foregroundStyle(palette.ink4)
+            HStack(spacing: 4) {
+                if pinned { Image(systemName: "pin.fill").uiFont(8).foregroundStyle(palette.ink4) }
+                Text(shortAge(lastActive, now: now))
+            }
+            .uiFont(11)
+            .monospacedDigit()
+            .foregroundStyle(palette.ink4)
         }
+    }
+}
+
+/// 正文命中：标识 + 标题 + 时间，下面一两行原文，关键词高亮。
+private struct ContentHitRow: View {
+    let session: SessionSummary
+    let workspace: Workspace?
+    let lastActive: Date
+    let now: Date
+    let snippet: String
+    let needle: String
+    let selected: Bool
+    let open: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                WorkspaceMark(workspace: workspace)
+                Text(session.displayTitle).uiFont(12.5).lineLimit(1)
+                    .foregroundStyle(selected || hovering ? palette.ink : palette.ink2)
+                Spacer(minLength: 4)
+                Text(shortAge(lastActive, now: now)).uiFont(11).monospacedDigit().foregroundStyle(palette.ink4)
+            }
+            Text(highlighted)
+                .uiFont(12)
+                .foregroundStyle(palette.ink3)
+                .lineLimit(2)
+                .padding(.leading, 20)
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 7)
+        .padding(.bottom, 8)
+        .background { RowBackground(selected: selected, hovering: hovering) }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+        .onHover { hovering = $0 }
+    }
+
+    private var highlighted: AttributedString {
+        let flat = snippet.replacingOccurrences(of: "\n", with: " ")
+        var text = AttributedString(flat)
+        var searchStart = text.startIndex
+        while searchStart < text.endIndex,
+              let range = text[searchStart...].range(of: needle, options: .caseInsensitive) {
+            text[range].backgroundColor = palette.warn.opacity(palette.dark ? 0.35 : 0.3)
+            text[range].foregroundColor = palette.ink
+            searchStart = range.upperBound
+        }
+        return text
     }
 }
 
@@ -440,6 +647,7 @@ private struct SessionRow: View {
 private struct ChildRow: View {
     let session: SessionSummary
     let selected: Bool
+    var pending = 0
     let open: () -> Void
     @Environment(\.palette) private var palette
     @State private var hovering = false
@@ -449,7 +657,11 @@ private struct ChildRow: View {
             Text(session.displayTitle).uiFont(12.5).lineLimit(1)
                 .foregroundStyle(selected || hovering ? palette.ink : palette.ink3)
             Spacer(minLength: 4)
-            if session.running { ProgressView().controlSize(.mini) }
+            if pending > 0 {
+                Circle().fill(palette.warn).frame(width: 6, height: 6)
+            } else if session.running {
+                ProgressView().controlSize(.mini)
+            }
         }
         .padding(.leading, 30)
         .padding(.trailing, 8)
@@ -468,6 +680,7 @@ private struct ChildRow: View {
 private struct ArchivedRow: View {
     let session: SessionSummary
     let workspace: Workspace?
+    let lastActive: Date
     let now: Date
     let selected: Bool
     let open: () -> Void
@@ -491,7 +704,7 @@ private struct ArchivedRow: View {
                     .contentShape(Rectangle())
                     .help("恢复")
             } else {
-                Text(shortAge(session.updatedAt, now: now)).uiFont(11).monospacedDigit().foregroundStyle(palette.ink4)
+                Text(shortAge(lastActive, now: now)).uiFont(11).monospacedDigit().foregroundStyle(palette.ink4)
             }
         }
         .padding(.horizontal, 8)

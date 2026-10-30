@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import WestieKit
 
 /// 五个面板的排布：主边栏、侧边栏通高；顶部、底部只在对话面板上下。
@@ -216,6 +217,36 @@ struct SplitHandle: View {
     }
 }
 
+/// 侧栏拖来的会话落在对话窗口上：右侧三分之一并排打开，其余位置在这个窗口里打开。
+private struct SessionDropDelegate: DropDelegate {
+    enum Zone { case here, side }
+    let accepts: Bool
+    let width: () -> CGFloat
+    @Binding var zone: Zone?
+    let open: (String, Zone) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool { accepts && info.hasItemsConforming(to: [.utf8PlainText]) }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard accepts else { return DropProposal(operation: .forbidden) }
+        zone = info.location.x > width() * 2 / 3 ? .side : .here
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) { zone = nil }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let target = zone ?? .here
+        zone = nil
+        guard let provider = info.itemProviders(for: [.utf8PlainText]).first else { return false }
+        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let text = object as? String, let sessionId = SessionDrag.sessionId(from: text) else { return }
+            Task { @MainActor in open(sessionId, target) }
+        }
+        return true
+    }
+}
+
 /// 一个窗口。会话列表这类导航窗口直接坐在外框上，其余窗口是卡片。
 private struct WindowTile: View {
     let panel: PanelID
@@ -227,6 +258,7 @@ private struct WindowTile: View {
     @State private var nearGrip = false
     @State private var onGrip = false
     @State private var showingMap = false
+    @State private var dropZone: SessionDropDelegate.Zone?
 
     private var focused: Bool { layout.focusedWindowId == window.id }
     private var onFrame: Bool { window.content == .sessions }
@@ -260,6 +292,33 @@ private struct WindowTile: View {
         .simultaneousGesture(TapGesture().onEnded { layout.focus(window.id) })
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Workbench.space)) } action: {
             layout.tileFrames[window.id] = $0
+        }
+        .overlay { dropHighlight }
+        .onDrop(of: [.utf8PlainText], delegate: SessionDropDelegate(
+            accepts: window.content.sessionId != nil,
+            width: { layout.tileFrames[window.id]?.width ?? 0 },
+            zone: $dropZone
+        ) { sessionId, zone in
+            layout.focus(window.id)
+            model.selectedSessionId = sessionId
+            layout.openConversation(sessionId, mode: zone == .side ? .sideBySide : .navigate)
+        })
+    }
+
+    /// 从侧栏拖会话过来时的落点提示：整张卡片 = 在这里打开，右侧三分之一 = 并排打开。
+    @ViewBuilder
+    private var dropHighlight: some View {
+        if let dropZone {
+            GeometryReader { proxy in
+                let width = dropZone == .side ? proxy.size.width / 3 : proxy.size.width
+                RoundedRectangle(cornerRadius: Metrics.cardRadius)
+                    .fill(palette.accent.opacity(0.08))
+                    .strokeBorder(palette.accent.opacity(0.35), lineWidth: 1)
+                    .frame(width: width)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .allowsHitTesting(false)
+            .animation(.easeOut(duration: 0.12), value: dropZone)
         }
     }
 
@@ -402,8 +461,11 @@ private struct WindowTile: View {
             SidebarView(model: model, layout: layout)
         case .conversation(let sessionId):
             if let conversation = model.conversations[sessionId] {
-                ConversationView(model: model, conversation: conversation)
-                    .id(sessionId)
+                ConversationView(model: model, conversation: conversation) { id in
+                    model.selectedSessionId = id
+                    layout.openConversation(id)
+                }
+                .id(sessionId)
             } else {
                 // 会话模型下一帧就建好，这里留空，不闪转圈
                 Color.clear

@@ -82,6 +82,13 @@ final class AppModel {
 
     init(configuration: KernelConfiguration) {
         self.configuration = configuration
+        // 每个数据目录各记各的，mock 不会清掉真实配置的记录。
+        touchedKey = "sessionList.touchedAt:" + configuration.location.dshHome.standardizedFileURL.path
+        let stored = UserDefaults.standard.dictionary(forKey: touchedKey) as? [String: Double]
+            ?? (configuration.sharesDSHHome ? UserDefaults.standard.dictionary(forKey: "sessionList.restoredAt") as? [String: Double] : nil)
+            ?? [:]
+        touchedAt = stored.mapValues { Date(timeIntervalSince1970: $0) }
+        UserDefaults.standard.removeObject(forKey: "sessionList.restoredAt")
         settings.app = self
     }
 
@@ -237,6 +244,8 @@ final class AppModel {
         for item in value["items"]?.arrayValue ?? [] {
             if let summary = SessionSummary(item) { next[summary.id] = summary }
         }
+        // 列表里的标题来自缓存投影，改名后一段时间里新旧标题会交替出现：本次运行里改过的以本地为准。
+        for (id, title) in renamedTitles { next[id]?.title = title }
         sessions = next
     }
 
@@ -250,31 +259,79 @@ final class AppModel {
         }
     }
 
-    /// 侧栏主列表：所有进行中的顶层会话（排除已归档、子 Agent 会话和没发过消息的空会话），按最近活动排序。
+    /// 侧栏主列表：置顶的在前（按内核的置顶顺序），其余按最近活动排序。
+    /// 排除已归档的、子 Agent 会话（收在父会话下）和没发过消息的空会话；分叉出的会话是独立会话，照常排进来。
     /// 空会话只在正选中时显示，发出第一条消息后就是正常会话。
-    var activeSessions: [SessionSummary] {
-        sessions.values
-            .filter { $0.parentSessionId == nil && !board.archivedSessionIds.contains($0.id) && (!$0.blank || $0.id == selectedSessionId) }
-            .sorted { $0.updatedAt > $1.updatedAt }
+    var activeSessions: [SessionSummary] { pinnedSessions + timelineSessions }
+
+    var pinnedSessions: [SessionSummary] {
+        board.pinnedSessionIds.compactMap { sessions[$0] }.filter { isListed($0) && !board.archivedSessionIds.contains($0.id) }
+    }
+
+    var timelineSessions: [SessionSummary] {
+        let pinned = Set(board.pinnedSessionIds)
+        return sessions.values
+            .filter { isListed($0) && !pinned.contains($0.id) && !board.archivedSessionIds.contains($0.id) }
+            .sorted { lastActive($0) > lastActive($1) }
     }
 
     /// 侧栏底部「归档」里的会话，按最近活动排序。
     var archivedSessions: [SessionSummary] {
         sessions.values
-            .filter { $0.parentSessionId == nil && board.archivedSessionIds.contains($0.id) }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .filter { !$0.isSubagent && board.archivedSessionIds.contains($0.id) }
+            .sorted { lastActive($0) > lastActive($1) }
     }
 
-    /// 挂在某个会话下的子会话（子 Agent、分叉），按最近活动排序。
+    private func isListed(_ session: SessionSummary) -> Bool {
+        !session.isSubagent && (!session.blank || session.id == selectedSessionId)
+    }
+
+    func isPinned(_ sessionId: String) -> Bool { board.pinnedSessionIds.contains(sessionId) }
+
+    /// 某个会话派出的全部子 Agent 会话（含子 Agent 再派出的），按最近活动排序。
     func children(of sessionId: String) -> [SessionSummary] {
-        sessions.values.filter { $0.parentSessionId == sessionId }.sorted { $0.updatedAt > $1.updatedAt }
+        var found: [SessionSummary] = []
+        var queue = [sessionId]
+        var seen: Set<String> = [sessionId]
+        while let parent = queue.popLast() {
+            for child in sessions.values where child.isSubagent && child.parentSessionId == parent && seen.insert(child.id).inserted {
+                found.append(child)
+                queue.append(child.id)
+            }
+        }
+        return found.sorted { lastActive($0) > lastActive($1) }
     }
 
-    /// 会话所在的工作区；子会话跟着父会话走。
+    /// 子 Agent 会话最上层的那个普通会话（侧栏里它挂在谁下面）。
+    func topLevelAncestor(of session: SessionSummary) -> SessionSummary {
+        var current = session
+        var seen: Set<String> = [session.id]
+        while current.isSubagent, let parent = current.parentSessionId.flatMap({ sessions[$0] }), seen.insert(parent.id).inserted {
+            current = parent
+        }
+        return current
+    }
+
+    /// 会话所在的工作区；子 Agent 会话跟着父会话走，其余看自己登记在哪个工作区。
     func workspace(for session: SessionSummary) -> Workspace? {
-        if let parent = session.parentSessionId, let summary = sessions[parent] { return workspace(for: summary) }
-        return board.ordered.first { $0.sessionIds.contains(session.id) }
-            ?? session.cwd.flatMap { cwd in board.ordered.first { $0.path == cwd } }
+        let owner = topLevelAncestor(of: session)
+        return board.ordered.first { $0.sessionIds.contains(owner.id) }
+            ?? owner.cwd.flatMap { cwd in board.ordered.first { $0.path == cwd } }
+    }
+
+    /// 最近一次有动静：用户发消息（内核的 updatedAt），或本机看到它开始、结束运行，或刚从归档恢复。
+    func lastActive(_ session: SessionSummary) -> Date {
+        max(session.updatedAt, touchedAt[session.id] ?? .distantPast)
+    }
+
+    /// 自己或子 Agent 在运行。
+    func isBusy(_ session: SessionSummary) -> Bool {
+        session.running || children(of: session.id).contains(where: \.running)
+    }
+
+    /// 自己和子 Agent 的待审批、待回答一起算。
+    func pendingCountIncludingChildren(for sessionId: String) -> Int {
+        children(of: sessionId).reduce(pendingCount(for: sessionId)) { $0 + pendingCount(for: $1.id) }
     }
 
     /// 新建面板里的工作区：最近用过的在前，「无项目」（内核的默认工作区）放最后。
@@ -297,9 +354,13 @@ final class AppModel {
         case .emit(let name, let args):
             switch name {
             case "api-session/added":
-                if let summary = args.first.flatMap(SessionSummary.init) { sessions[summary.id] = summary }
+                if var summary = args.first.flatMap(SessionSummary.init) {
+                    if let title = renamedTitles[summary.id] { summary.title = title }
+                    sessions[summary.id] = summary
+                }
             case "api-session/status":
                 if let id = args.first?.stringValue, let running = args.dropFirst().first?.boolValue {
+                    if sessions[id]?.running != running, let session = sessions[id] { touch(topLevelAncestor(of: session).id) }
                     sessions[id]?.running = running
                     if !running { scheduleSessionRefresh() }
                 }
@@ -353,14 +414,12 @@ final class AppModel {
         do {
             let value = try await connection.call("workspace/create", ["request": ["path": .string(path)]])
             guard thenNewSession else { return }
-            let id = value["workspaceId"]?.stringValue ?? value["workspace"]?["workspaceId"]?.stringValue
-            for _ in 0..<40 {
-                if let workspace = board.ordered.first(where: { $0.id == id || $0.path == path }) {
-                    await newSession(in: workspace)
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(50))
+            // 内核建好才返回，直接用返回的工作区新建，不等工作区列表推过来。
+            guard let workspace = value["workspace"].flatMap(WorkspaceBoard.decode) else {
+                lastError = "工作区已添加，但没能在里面新建会话"
+                return
             }
+            await newSession(in: workspace)
         } catch {
             report(error)
         }
@@ -389,35 +448,65 @@ final class AppModel {
         #endif
         return 3 * 24 * 3600
     }()
-    private static let restoredKey = "sessionList.restoredAt"
+    /// 本机看到的最近动静（运行开始、结束，从归档恢复），补内核 updatedAt 只记用户消息的不足。
+    private(set) var touchedAt: [String: Date] = [:]
+    private let touchedKey: String
     private var autoArchiveTask: Task<Void, Never>?
 
-    func archive(_ sessionId: String) async {
-        guard let connection else { return }
+    private func touch(_ sessionId: String) {
+        touchedAt[sessionId] = Date()
+        saveTouched()
+    }
+
+    private func saveTouched() {
+        UserDefaults.standard.set(touchedAt.mapValues(\.timeIntervalSince1970), forKey: touchedKey)
+    }
+
+    /// 手动归档：内核会顺带取消置顶。`quiet` 时被拒绝也不弹横幅（自动归档用）。
+    @discardableResult
+    func archive(_ sessionId: String, quiet: Bool = false) async -> Bool {
+        guard let connection else { return false }
         do {
             _ = try await connection.call("workspace/archiveSession", ["request": ["sessionId": .string(sessionId)]])
-        } catch let failure as RemoteFailure where failure.code.contains("Active") || failure.message.contains("active") {
-            lastError = "会话还在运行，停止后再归档"
+            return true
+        } catch let failure as RemoteFailure where failure.code == "workspace/session-active" {
+            if !quiet { lastError = Self.activeMessage(failure.details?["activity"]) }
         } catch {
-            report(error)
+            if !quiet { report(error) }
         }
+        return false
     }
 
-    func unarchive(_ sessionId: String) async {
-        guard let connection else { return }
-        // 恢复的会话从现在起重新计闲置时间，否则下一轮自动归档马上又把它收回去。
-        var restored = UserDefaults.standard.dictionary(forKey: Self.restoredKey) as? [String: Double] ?? [:]
-        restored[sessionId] = Date().timeIntervalSince1970
-        UserDefaults.standard.set(restored, forKey: Self.restoredKey)
+    /// 内核说「还有活动」时，按活动的种类说清楚为什么不能归档。
+    private static func activeMessage(_ activity: JSONValue?) -> String {
+        let kinds = Set(activity?.arrayValue?.compactMap { $0["kind"]?.stringValue } ?? [])
+        if kinds.contains("turn") { return "会话还在运行，停止后再归档" }
+        if kinds.contains("schedule") { return "会话有定时任务，暂时不能归档" }
+        if !kinds.isEmpty { return "会话还有任务在跑，暂时不能归档" }
+        return "会话还在运行，暂时不能归档"
+    }
+
+    /// 从归档恢复：成功后从现在起重新计闲置时间，排到时间线最上面。
+    @discardableResult
+    func unarchive(_ sessionId: String) async -> Bool {
+        guard let connection else { return false }
         do {
             _ = try await connection.call("workspace/unarchiveSession", ["request": ["sessionId": .string(sessionId)]])
+            touch(sessionId)
+            return true
         } catch {
             report(error)
+            return false
         }
     }
 
-    /// 连上内核后每 10 分钟检查一次：闲置超过 3 天、没在运行、没有待处理、不在显示的顶层会话归档。
-    /// 自动化脚本连真实数据时只读，不自动归档。
+    func togglePin(_ sessionId: String) async {
+        guard let connection else { return }
+        let method = isPinned(sessionId) ? "workspace/unpinSession" : "workspace/pinSession"
+        do { _ = try await connection.call(method, ["request": ["sessionId": .string(sessionId)]]) } catch { report(error) }
+    }
+
+    /// 连上内核后每 10 分钟检查一次（见 `isStale`）。自动化脚本连真实数据时只读，不自动归档。
     private func startAutoArchive() {
         autoArchiveTask?.cancel()
         let automation = ProcessInfo.processInfo.environment["WESTIE_AUTOMATION"] != nil
@@ -430,25 +519,109 @@ final class AppModel {
         }
     }
 
-    private func autoArchive() async {
-        guard phase == .ready else { return }
-        let restored = UserDefaults.standard.dictionary(forKey: Self.restoredKey) as? [String: Double] ?? [:]
-        let cutoff = Date().addingTimeInterval(-Self.autoArchiveAfter)
-        let stale = activeSessions.filter { session in
-            let restoredAt = restored[session.id].map { Date(timeIntervalSince1970: $0) } ?? .distantPast
-            return max(session.updatedAt, restoredAt) < cutoff && !session.running && !session.blank
-                && pendingCount(for: session.id) == 0 && !wantedConversations.contains(session.id)
-        }
-        for session in stale { await archive(session.id) }
-        // 已经不在归档里的恢复记录没用了，顺手清掉。
-        let kept = restored.filter { board.archivedSessionIds.contains($0.key) == false && sessions[$0.key] != nil }
-        if kept.count != restored.count { UserDefaults.standard.set(kept, forKey: Self.restoredKey) }
+    /// 闲置超过 3 天、没置顶、自己和子 Agent 都不在运行、没有待处理、不在显示的会话。
+    private func isStale(_ session: SessionSummary) -> Bool {
+        lastActive(session) < Date().addingTimeInterval(-Self.autoArchiveAfter)
+            && !session.blank && !session.isSubagent && !isPinned(session.id)
+            && !board.archivedSessionIds.contains(session.id)
+            && !isBusy(session) && pendingCountIncludingChildren(for: session.id) == 0
+            && !wantedConversations.contains(session.id)
     }
 
-    func send(_ text: String, to sessionId: String) async {
-        guard let connection, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        // 在归档的会话里发消息，它就回到主列表。
-        if board.archivedSessionIds.contains(sessionId) { await unarchive(sessionId) }
+    private func autoArchive() async {
+        // 等工作区 baseline 到了再动手，否则置顶、归档都还不知道。
+        guard phase == .ready, board.hasBaseline, let connection else { return }
+        let candidates = timelineSessions.filter(isStale).map(\.id)
+        for id in candidates {
+            // 每次归档前按最新状态再核一遍：这一轮里用户可能刚打开、恢复、置顶了它，或连接已经换了。
+            guard !Task.isCancelled, phase == .ready, self.connection === connection else { return }
+            guard let session = sessions[id], isStale(session) else { continue }
+            await archive(id, quiet: true)
+        }
+        // 过了闲置期的记录不再起作用，已删除的会话也不用记。
+        let cutoff = Date().addingTimeInterval(-Self.autoArchiveAfter)
+        let kept = touchedAt.filter { $0.value >= cutoff && sessions[$0.key] != nil }
+        if kept.count != touchedAt.count {
+            touchedAt = kept
+            saveTouched()
+        }
+    }
+
+    // MARK: - 重命名、分叉、搜索
+
+    /// 本次运行里改过名的会话（列表投影可能还是旧标题）。
+    private var renamedTitles: [String: String] = [:]
+
+    func rename(_ sessionId: String, to title: String) async {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let connection, !title.isEmpty, title != sessions[sessionId]?.title else { return }
+        let previous = sessions[sessionId]?.title
+        sessions[sessionId]?.title = title
+        renamedTitles[sessionId] = title
+        do {
+            // 内核会把标题规整一遍（去空白、截长），以它返回的为准。
+            let value = try await connection.call("session/rename", ["request": ["sessionId": .string(sessionId), "title": .string(title)]])
+            if let accepted = value["title"]?.stringValue {
+                renamedTitles[sessionId] = accepted
+                sessions[sessionId]?.title = accepted
+            }
+        } catch {
+            renamedTitles[sessionId] = nil
+            sessions[sessionId]?.title = previous
+            report(error)
+        }
+    }
+
+    /// 从最后一个完成的回合分叉出一个独立会话并选中它。
+    func fork(_ sessionId: String) async -> String? {
+        guard let connection else { return nil }
+        do {
+            let value = try await connection.call("session/fork", ["request": ["sessionId": .string(sessionId)]])
+            guard let id = value["sessionId"]?.stringValue else { return nil }
+            try? await refreshSessions()
+            selectedSessionId = id
+            return id
+        } catch let failure as RemoteFailure where failure.code == "session/fork-unavailable" {
+            lastError = "还没有完成的回合，暂时不能分叉"
+        } catch {
+            report(error)
+        }
+        return nil
+    }
+
+    struct SearchHit: Identifiable, Equatable {
+        var id: String { sessionId }
+        let sessionId: String
+        let snippet: String
+    }
+
+    /// 内核没开会话索引（DSH 默认 `openAt: never`）时正文搜索不可用，之后只搜标题。
+    private(set) var contentSearchAvailable = true
+
+    /// 正文搜索：内核最多给 20 条，每条一段原文。
+    func searchContent(_ query: String) async throws -> [SearchHit] {
+        guard let connection, contentSearchAvailable else { return [] }
+        let value: JSONValue
+        do {
+            value = try await connection.call("session/search", ["request": ["query": .string(query)]])
+        } catch let failure as RemoteFailure where failure.message.contains("search is disabled") {
+            contentSearchAvailable = false
+            return []
+        }
+        return (value["items"]?.arrayValue ?? []).compactMap { item in
+            guard let id = item["sessionId"]?.stringValue, let snippet = item["snippet"]?.stringValue else { return nil }
+            return SearchHit(sessionId: id, snippet: snippet)
+        }
+    }
+
+    /// 发消息；返回是否发出去了（没发出去时输入框保留草稿）。
+    @discardableResult
+    func send(_ text: String, to sessionId: String) async -> Bool {
+        guard let connection, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        // 在归档的会话里发消息，它就回到主列表；恢复失败就不发，内核会拦下归档会话的回合。
+        if board.archivedSessionIds.contains(sessionId) {
+            guard await unarchive(sessionId) else { return false }
+        }
         do {
             _ = try await connection.call("session/prompt", ["request": [
                 "requestId": .string(UUID().uuidString),
@@ -457,8 +630,10 @@ final class AppModel {
                 "content": .array([["type": "text", "text": .string(text)]]),
                 "clientTimeZone": .string(TimeZone.current.identifier),
             ]])
+            return true
         } catch {
             report(error)
+            return false
         }
     }
 
@@ -546,7 +721,8 @@ final class AppModel {
         }
         guard let connection, phase == .ready else { return }
         for id in ids where conversations[id] == nil {
-            let conversation = ConversationModel(sessionId: id)
+            let summary = sessions[id]
+            let conversation = ConversationModel(sessionId: id, parentSessionId: summary?.isSubagent == true ? summary?.parentSessionId : nil)
             conversations[id] = conversation
             conversation.open(on: connection)
         }

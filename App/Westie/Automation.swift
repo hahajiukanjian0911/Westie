@@ -43,7 +43,7 @@ enum Automation {
             return
         }
         note("ready mock=\(model.isMock)")
-        let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer", "set", "archive", "unarchive"]
+        let writingSteps: Set<String> = ["workspace", "new", "prompt", "approve", "reject", "answer", "set", "archive", "unarchive", "pin", "rename"]
 
         for step in script.split(separator: ";").map({ $0.trimmingCharacters(in: .whitespaces) }) where !step.isEmpty {
             let (verb, argument) = step.firstIndex(of: ":").map {
@@ -177,19 +177,47 @@ enum Automation {
             case "shot":
                 try? await Task.sleep(for: .milliseconds(400))
                 note(snapshot(to: URL(filePath: argument)) ? "shot \(argument)" : "FAIL shot \(argument)")
-            case "archive":
-                // 归档主列表第 n 个会话（默认选中的）
-                guard let id = Int(argument).flatMap({ model.activeSessions.indices.contains($0) ? model.activeSessions[$0].id : nil })
-                    ?? model.selectedSessionId else { note("FAIL 没有可归档的会话"); continue }
-                let before = model.board.archivedSessionIds.count
-                await model.archive(id)
-                await until { model.board.archivedSessionIds.count > before }
-                note("archived \(id) total=\(model.board.archivedSessionIds.count)")
+            case "archive", "pin", "rename":
+                // 对主列表第 n 个会话（不写序号就是选中的）归档 / 置顶或取消置顶 / 改名（rename:<n>=<新名字>）
+                let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                let index = parts.first.flatMap { $0.isEmpty ? nil : $0 }
+                let target: String?
+                if let index {
+                    target = Int(index).flatMap { model.activeSessions.indices.contains($0) ? model.activeSessions[$0].id : nil }
+                } else {
+                    target = model.selectedSessionId
+                }
+                guard let id = target else { note("FAIL \(verb) 没有第 \(index ?? "选中") 个会话"); continue }
+                switch verb {
+                case "archive":
+                    let accepted = await model.archive(id)
+                    let done = accepted ? await until { model.board.archivedSessionIds.contains(id) } : false
+                    note(done ? "archived \(id) total=\(model.board.archivedSessionIds.count)" : "FAIL archive \(id) accepted=\(accepted) error=\(model.lastError ?? "-")")
+                case "pin":
+                    let wasPinned = model.isPinned(id)
+                    await model.togglePin(id)
+                    let done = await until { model.isPinned(id) != wasPinned }
+                    note(done ? "pin \(id) pinned=\(model.isPinned(id))" : "FAIL pin \(id)")
+                default:
+                    guard parts.count == 2 else { note("FAIL rename 要写成 rename:<n>=<新名字>"); continue }
+                    await model.rename(id, to: parts[1])
+                    let done = await until { model.sessions[id]?.title == parts[1] }
+                    note(done ? "renamed \(id) \(parts[1])" : "FAIL rename \(id) error=\(model.lastError ?? "-")")
+                }
             case "unarchive":
                 guard let session = model.archivedSessions.first else { note("FAIL 归档是空的"); continue }
-                await model.unarchive(session.id)
-                await until { !model.board.archivedSessionIds.contains(session.id) }
-                note("unarchived \(session.id)")
+                let accepted = await model.unarchive(session.id)
+                let done = accepted ? await until { !model.board.archivedSessionIds.contains(session.id) } : false
+                let top = model.timelineSessions.first?.id == session.id
+                note(done && top ? "unarchived \(session.id) top=true" : "FAIL unarchive \(session.id) accepted=\(accepted) top=\(top)")
+            case "search":
+                // 正文搜索（只读）
+                do {
+                    let hits = try await model.searchContent(argument)
+                    note("search \(argument): \(hits.count) " + hits.prefix(3).map { "\(model.sessions[$0.sessionId]?.displayTitle ?? $0.sessionId)「\($0.snippet.prefix(40))」" }.joined(separator: " | "))
+                } catch {
+                    note("FAIL search \(argument) \(error)")
+                }
             case "newpanel":
                 // 打开或收起 ⌘N 面板（截图用）
                 model.showingNewSession = argument != "off"
@@ -199,6 +227,7 @@ enum Automation {
                     let kids = model.children(of: session.id).count
                     return "\(model.workspace(for: session)?.displayTitle ?? "?")/\(session.displayTitle)"
                         + (session.running ? "[运行中]" : "") + (kids > 0 ? "[子\(kids)]" : "")
+                        + (model.isPinned(session.id) ? "[置顶]" : "")
                         + (session.id == model.selectedSessionId ? "[选中]" : "")
                 }
                 note("sidebar active: \(model.activeSessions.map(describe).joined(separator: " | "))")
@@ -317,11 +346,14 @@ enum Automation {
         return numbers.count == 2 ? [CGPoint(x: numbers[0], y: numbers[1])] : nil
     }
 
-    private static func until(timeout: Double = 10, _ condition: () -> Bool) async {
+    /// 等条件成立；超时返回 false，由调用处记 FAIL。
+    @discardableResult
+    private static func until(timeout: Double = 10, _ condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
             try? await Task.sleep(for: .milliseconds(100))
         }
+        return condition()
     }
 
     /// 把主窗口内容渲染成 PNG（cacheDisplay 不需要屏幕录制权限，也不激活窗口）。

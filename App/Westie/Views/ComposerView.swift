@@ -50,7 +50,10 @@ struct ComposerView: View {
         let text = draft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draft = ""
-        Task { await model.send(text, to: conversation.sessionId) }
+        Task {
+            // 没发出去（比如恢复归档失败）就把草稿放回来，除非这期间又输入了新内容。
+            if await !model.send(text, to: conversation.sessionId), draft.isEmpty { draft = text }
+        }
     }
 }
 
