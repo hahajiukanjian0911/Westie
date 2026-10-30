@@ -15,6 +15,7 @@ struct RootView: View {
     var body: some View {
         ZStack {
             FrameBackground()
+            TrafficLights().frame(width: 0, height: 0)
             if workbenchShown {
                 Workbench(layout: layout, model: model)
                     // 减少动态效果时只淡入，不位移不缩放

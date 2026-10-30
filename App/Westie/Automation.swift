@@ -14,7 +14,7 @@ import WestieKit
 ///      `toggle:<面板>` `hide`（收起聚焦窗口） `appearance:dark|light`（只改 App 外观） `layout`（记录各面板的窗口）
 ///      拖放：`drag:<x>,<y>`（从聚焦窗口标题栏拖到 Workbench 坐标）`drag:<面板>.<n>@<fx>,<fy>`（拖到某面板第 n 个窗口内的比例位置）
 ///      `drag:edge.<primary|secondary|bottom>` `drag:map.<面板>`（经上沿布局条） `drop` `cancel` `hover:<面板>`（布局按钮悬停预览）
-///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图） `hittest`（各窗口顶部正中、标题栏、正文的命中视图）
+///      `grips` / `grips:off`（所有窗口的顶部拖动条常亮，用于截图） `frameshot:<png>`（连标题栏一起截） `hittest`（各窗口顶部正中、标题栏、正文的命中视图）
 ///      会话列表：`archive[:<序号>]` `unarchive`（恢复最近一个归档） `newpanel[:off]`（⌘N 面板）
 ///      设置：`settings[:<分页>]`（打开设置卡片并记录读到的值） `theme:<序号>`（换主题） `set:<键>=<值>`（写内核设置后重读）
 ///      `font:<项>=<值>`（改字体、字号、行高等，`preset=<序号>` 换搭配，`expand=true` 展开逐项自定义；项见下方 font 分支）
@@ -240,6 +240,9 @@ enum Automation {
                     note("FAIL step \(argument)")
                 }
                 if verb == "processframes", arguments.count == 2 { await frames(to: URL(filePath: arguments[1])) }
+            case "frameshot":
+                try? await Task.sleep(for: .milliseconds(400))
+                note(snapshot(to: URL(filePath: argument), frame: true) ? "shot \(argument)" : "FAIL shot \(argument)")
             case "shot":
                 try? await Task.sleep(for: .milliseconds(400))
                 note(snapshot(to: URL(filePath: argument)) ? "shot \(argument)" : "FAIL shot \(argument)")
@@ -292,12 +295,18 @@ enum Automation {
                 guard let content = NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) && $0.frame.width > 400 })?.contentView else { note("FAIL hittest"); break }
                 for (id, frame) in layout.tileFrames {
                     let points = [("grip", frame.midX, frame.minY + 6), ("title-left", frame.minX + frame.width * 0.3, frame.minY + 20),
-                                  ("title-right", frame.minX + frame.width * 0.7, frame.minY + 20), ("body", frame.midX, frame.midY)]
+                                  ("title-right", frame.minX + frame.width * 0.7, frame.minY + 20), ("body", frame.midX, frame.midY),
+                        ("title-text", frame.minX + (frame.minX < 120 ? 130 : 30), Metrics.lightsHeight / 2)]
                     let hits = points.map { name, x, y in
                         // hitTest 要的是父视图坐标
-                        let point = content.convert(NSPoint(x: x, y: content.isFlipped ? y : content.bounds.height - y), to: content.superview)
-                        let hit = content.hitTest(point)
+                        let root = content.superview ?? content
+                        let point = content.convert(NSPoint(x: x, y: content.isFlipped ? y : content.bounds.height - y), to: root.superview)
+                        let hit = root.hitTest(point)
                         return "\(name)=\(hit is WindowDragArea.AreaView ? "drag" : hit.map { String(reflecting: type(of: $0)).split(separator: ".").suffix(2).joined(separator: ".").prefix(28) } ?? "nil")"
+                    }
+                    if let close = content.window?.standardWindowButton(.closeButton) {
+                        let rect = close.convert(close.bounds, to: nil)
+                        note("lights close midY-from-top=\(content.window!.frame.height - rect.midY) minX=\(rect.minX)")
                     }
                     note("hittest \(PanelID.allCases.lazy.compactMap { layout.state($0).window(id) }.first?.content.title(model: model) ?? "?") \(hits.joined(separator: " "))")
                 }
@@ -469,9 +478,11 @@ enum Automation {
         }
     }
 
-    private static func snapshot(to url: URL) -> Bool {
-        guard let view = NSApp.windows.first(where: { $0.contentView != nil && $0.title == "Westie" })?.contentView
-            ?? NSApp.windows.first?.contentView,
+    /// `frame` 为真时连标题栏（红绿灯、工具栏）一起画：取窗口框架视图而不是内容视图。
+    private static func snapshot(to url: URL, frame: Bool = false) -> Bool {
+        let content = NSApp.windows.first(where: { $0.contentView != nil && !($0 is NSPanel) && $0.frame.width > 400 })?.contentView
+            ?? NSApp.windows.first?.contentView
+        guard let view = frame ? content?.superview ?? content : content,
             let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds)
         else { return false }
         view.cacheDisplay(in: view.bounds, to: representation)

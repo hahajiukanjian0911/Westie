@@ -41,7 +41,7 @@ struct Workbench: View {
                 panel(.secondary).frame(width: layout.state(.secondary).size)
             }
         }
-        .padding(Metrics.gap)
+        .padding(layout.fillsWindow ? 0 : Metrics.gap)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { layout.bounds = $0 }
         .overlay(alignment: .topLeading) { sidebarToggle }
         .overlay { DragOverlay(layout: layout, model: model) }
@@ -81,7 +81,7 @@ struct Workbench: View {
         }
     }
 
-    /// 红绿灯右侧的主边栏开关。主边栏收起时它落进最左上角窗口的标题行。
+    /// 红绿灯右侧的主边栏开关，和红绿灯同在顶栏中线上。主边栏收起时它落进最左上角窗口的标题行。
     private var sidebarToggle: some View {
         Button("主边栏", systemImage: "sidebar.left") { layout.toggle(.primary) }
             .labelStyle(.iconOnly)
@@ -263,17 +263,20 @@ private struct WindowTile: View {
     @State private var dropZone: SessionDropDelegate.Zone?
 
     private var focused: Bool { layout.focusedWindowId == window.id }
+    /// 会话列表直接坐在外框上，固定在主边栏：没有标题行、拖动条和关闭（设计稿 2026-10-28-panels v4）。
     private var onFrame: Bool { window.content == .sessions }
+    /// 只剩这一张卡片时贴满窗口，圆角跟窗口一致。
+    private var fills: Bool { layout.fillsWindow && panel == .center }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if !onFrame { header }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .modifier(TileSurface(onFrame: onFrame, palette: palette))
+        .modifier(TileSurface(onFrame: onFrame, fills: fills, palette: palette))
         .overlay(alignment: .top) {
-            WindowGrip(shown: gripShown, highlighted: onGrip)
+            if !onFrame { WindowGrip(shown: gripShown, highlighted: onGrip) }
         }
         .opacity(layout.drag?.windowId == window.id ? 0.35 : 1)
         .animation(.easeOut(duration: 0.16), value: layout.drag?.windowId == window.id)
@@ -342,7 +345,6 @@ private struct WindowTile: View {
 
     private var leading: CGFloat {
         if holdsLights { return 112 }
-        if onFrame { return 8 }
         return panel.isHorizontal ? 24 : 16
     }
 
@@ -361,7 +363,8 @@ private struct WindowTile: View {
         }
         .padding(.leading, leading)
         .padding(.trailing, 8)
-        .frame(height: onFrame ? 36 : 44)
+        // 贴满时卡片顶在窗口顶上，标题行占满整条顶栏；否则卡片顶在 8pt 处，标题行中心同样落在顶栏中线
+        .frame(height: fills ? Metrics.lightsHeight : Metrics.headerHeight)
         // 只有顶部正中的拖动条能拖窗口，标题栏其他空白处不拖；垫在标题栏底下，窄窗口里与按钮重叠时按钮优先
         .background(alignment: .top) { dragArea.frame(width: WindowGrip.hit.width, height: WindowGrip.hit.height) }
     }
@@ -394,9 +397,6 @@ private struct WindowTile: View {
     private var title: some View {
         let hidden = layout.hiddenWindows(in: panel)
         let label = HStack(spacing: 2) {
-            if window.content == .sessions {
-                AppLogo(size: 20).padding(.trailing, 4)
-            }
             Text(window.content.title(model: model))
                 .lineLimit(1)
             if !hidden.isEmpty {
@@ -406,7 +406,7 @@ private struct WindowTile: View {
             }
         }
         .uiFont(13, .semibold)
-        .foregroundStyle(focused || onFrame ? palette.ink : palette.ink2)
+        .foregroundStyle(focused ? palette.ink : palette.ink2)
 
         if hidden.isEmpty {
             label
@@ -604,11 +604,15 @@ struct WindowDragArea: NSViewRepresentable {
 
 private struct TileSurface: ViewModifier {
     let onFrame: Bool
+    let fills: Bool
     let palette: Palette
 
     func body(content: Content) -> some View {
         if onFrame {
             content
+        } else if fills {
+            // 贴满窗口：窗口自己的圆角裁边，不要描边和阴影
+            content.background(palette.card)
         } else {
             content.card(palette)
         }

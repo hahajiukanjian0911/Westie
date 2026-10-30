@@ -163,6 +163,8 @@ enum Metrics {
     /// 卡片圆角 = 窗口圆角 16 − 外框留白 + 2（同设计稿）。
     static let cardRadius: CGFloat = 10
     static let rowRadius: CGFloat = 6
-    /// 红绿灯那一行的高度。
-    static let lightsHeight: CGFloat = 40
+    /// 顶栏高度（设计稿 2026-10-28-panels v4）：红绿灯、侧栏开关和卡片标题行的中心都在它的一半处。
+    static let lightsHeight: CGFloat = 52
+    /// 卡片标题行高：卡片顶在外框留白 8 处，标题行中心正好落在顶栏中线上。
+    static let headerHeight: CGFloat = lightsHeight - 2 * gap
 }

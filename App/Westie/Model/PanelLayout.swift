@@ -128,8 +128,30 @@ final class PanelLayout {
         let saved = store.data(forKey: storageKey).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
         var panels = saved?.panels ?? Self.defaultPanels
         for id in PanelID.allCases where panels[id] == nil { panels[id] = Self.defaultPanels[id] }
+        Self.pinSessions(&panels)
         self.panels = panels
         focusedWindowId = saved?.focused
+    }
+
+    /// 会话列表固定在主边栏最前（设计稿 2026-10-28-panels v4）：旧布局里被拖到别处或关掉的，搬回来并显示。
+    private static func pinSessions(_ panels: inout [PanelID: PanelState]) {
+        var sessions = PanelWindow(content: .sessions)
+        for id in PanelID.allCases where id != .primary {
+            guard var state = panels[id], let index = state.windows.firstIndex(where: { $0.content == .sessions }) else { continue }
+            sessions = state.windows.remove(at: index)
+            state.shown.removeAll { $0 == sessions.id }
+            state.weights[sessions.id] = nil
+            panels[id] = state
+        }
+        var primary = panels[.primary] ?? PanelState(size: 260)
+        if let index = primary.windows.firstIndex(where: { $0.content == .sessions }) {
+            sessions = primary.windows.remove(at: index)
+        }
+        primary.windows.insert(sessions, at: 0)
+        primary.shown.removeAll { $0 == sessions.id }
+        primary.shown.insert(sessions.id, at: 0)
+        if primary.weights[sessions.id] == nil { primary.weights[sessions.id] = 1 }
+        panels[.primary] = primary
     }
 
     static var defaultPanels: [PanelID: PanelState] {
@@ -160,6 +182,11 @@ final class PanelLayout {
     /// 对话面板始终在；其余面板收起或没有并排显示的窗口时不占位置。
     func isVisible(_ panel: PanelID) -> Bool {
         panel == .center || (!state(panel).collapsed && (!state(panel).shown.isEmpty || assisting.contains(panel)))
+    }
+
+    /// 只有对话面板、且只并排一个窗口时，卡片贴满窗口，外框不露边（设计稿 2026-10-28-panels v4）。
+    var fillsWindow: Bool {
+        [PanelID.primary, .top, .secondary, .bottom].allSatisfy { !isVisible($0) } && state(.center).shown.count == 1
     }
 
     func canToggle(_ panel: PanelID) -> Bool { panel != .center && !state(panel).windows.isEmpty }
